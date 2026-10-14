@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from crimebase.evaluate import (
+    auc_from_proba,
     binary_scores,
     binned_proba,
     bootstrap_ci,
@@ -120,3 +121,11 @@ def test_paired_diff_of_identical_models_is_zero_and_of_a_better_model_is_positi
     assert same["diff"] == 0 and same["lo"] == 0 == same["hi"] and same["p_a_better"] == 0
     better = paired_bootstrap_diff(y, strong, weak, macro_f1_from_proba, groups, n_boot=200)
     assert better["lo"] > 0 and better["p_a_better"] == 1.0
+
+
+def test_auc_from_proba_matches_the_score_dictionary_and_is_bootstrappable():
+    rng = np.random.default_rng(0)
+    y, proba = make_scores(300, 0.6, rng)
+    assert auc_from_proba(y, proba) == pytest.approx(multiclass_scores(y, proba=proba)["auc_ovr"])
+    lo, hi = bootstrap_ci(y, proba, auc_from_proba, np.arange(300) // 3, n_boot=100)
+    assert lo < auc_from_proba(y, proba) < hi

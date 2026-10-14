@@ -164,3 +164,8 @@ def paired_bootstrap_diff(
 
 def macro_f1_from_proba(y_true, proba) -> float:
     return f1_score(y_true, np.asarray(proba).argmax(axis=1), labels=LABELS, average="macro")
+
+
+def auc_from_proba(y_true, proba) -> float:
+    """One-vs-rest ROC-AUC averaged over the three classes (bootstrap-friendly signature)."""
+    return float(roc_auc_score(y_true, np.asarray(proba), multi_class="ovr", labels=LABELS))

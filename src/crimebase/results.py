@@ -23,7 +23,7 @@ def _path(cfg: Config, target: str, name: str) -> Path:
 def save_comparison(
     cmp: Comparison, m: pd.DataFrame, cfg: Config, n_trials: int, n_boot: int
 ) -> Path:
-    """Write scores, paired tests, tuning history and holdout predictions; return the scores file."""
+    """Write scores, paired tests, tuning history and holdout predictions; return scores.csv."""
     out = cfg.paths.metrics
     out.mkdir(parents=True, exist_ok=True)
     t = cmp.target

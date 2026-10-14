@@ -120,3 +120,14 @@ def test_remaining_charts_render_and_save(tmp_path):
     for i, fig in enumerate(figs):
         out = viz.save_figure(fig, tmp_path / "sub" / f"f{i}.png")
         assert out.exists() and out.stat().st_size > 2000
+
+
+def test_show_displays_a_png_and_closes_the_figure(monkeypatch):
+    import IPython.display
+
+    shown = []
+    monkeypatch.setattr(IPython.display, "display", shown.append)
+    fig = viz.plot_hist(np.arange(10), "t", "x")
+    viz.show(fig)
+    assert len(shown) == 1 and shown[0].data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert not viz.plt.fignum_exists(fig.number)

@@ -422,3 +422,15 @@ def plot_learning_curve(history: list[float], best_round: int, title: str = "Ear
         "Training stops when the 2017-18 validation loss has not improved for 100 rounds",
     )
     return fig
+
+
+def show(fig, dpi: int = 130) -> None:
+    """Display a figure in a notebook as a PNG and close it (the Agg backend has no inline view)."""
+    import io
+
+    from IPython.display import Image, display
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    display(Image(buf.getvalue()))

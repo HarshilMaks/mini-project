@@ -36,7 +36,7 @@ def test_every_model_learns_a_strong_signal_and_returns_probabilities(name, data
     m = fit(name, Xtr, ytr, Xva, yva)
     proba = m.predict_proba(Xte)
     assert proba.shape == (len(Xte), 3)
-    assert np.allclose(proba.sum(axis=1), 1, atol=1e-4)
+    assert np.allclose(proba.sum(axis=1), 1, atol=1e-12, rtol=0)
     assert (proba.argmax(axis=1) == yte).mean() > 0.7
 
 

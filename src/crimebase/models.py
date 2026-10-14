@@ -55,7 +55,9 @@ class Fitted:
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         if self.name == "catboost":
             X = _catboost_frame(X)
-        return np.asarray(self.model.predict_proba(X), dtype=float)
+        proba = np.asarray(self.model.predict_proba(X), dtype=float)
+        # XGBoost computes in float32, so rows sum to 1 only within ~1e-7
+        return proba / proba.sum(axis=1, keepdims=True)
 
 
 def balanced_weights(y) -> np.ndarray:

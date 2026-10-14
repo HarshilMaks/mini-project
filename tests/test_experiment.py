@@ -175,3 +175,25 @@ def test_final_fit_returns_the_model_that_final_fit_predict_uses(matrix, cfg):  
     proba, trees2 = final_fit_predict("xgboost", matrix, cfg, "y_trend")
     assert trees == trees2 and model.best_iteration == trees
     assert np.allclose(model.predict_proba(matrix.loc[te, FEATURES]), proba)
+
+
+def test_min_cases_sensitivity_changes_the_labelled_rows_and_reports_paired_diffs():
+    from conftest import make_panel
+    from crimebase.experiment import min_cases_sensitivity
+
+    base = load_config()
+    cfg = replace(
+        base,
+        split=replace(
+            base.split,
+            train_to=2013,
+            val_years=(2014, 2015),
+            test_from=2016,
+            cv_windows=((2010, 2011), (2012, 2013), (2014, 2015)),
+        ),
+    )
+    table = min_cases_sensitivity(make_panel(), cfg, values=(50, 300), n_boot=30)
+    assert list(table.min_cases) == [50, 300]
+    assert table.n_test.iloc[0] > table.n_test.iloc[1]  # a higher bar leaves fewer rows
+    assert (table.diff_lo <= table.diff_hi).all()
+    assert np.allclose(table["diff"], table.model_f1 - table.rule_f1)

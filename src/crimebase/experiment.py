@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -21,7 +21,7 @@ from crimebase.evaluate import (
     persistence_pred,
     prior_proba,
 )
-from crimebase.features import FEATURES
+from crimebase.features import FEATURES, build_matrix
 from crimebase.models import MODEL_NAMES, Fitted, fit
 from crimebase.splits import dev_mask, holdout_mask, train_mask, val_mask
 from crimebase.tuning import TuneResult, tune
@@ -205,3 +205,43 @@ def run_comparison(
             )
             rows.append({"a": a, "b": b, "metric": metric_name, **diff})
     return Comparison(target, h, table, probas, tuning, pd.DataFrame(rows))
+
+
+def min_cases_sensitivity(
+    panel: pd.DataFrame,
+    cfg: Config,
+    values: tuple[int, ...] = (20, 50, 100, 200, 500),
+    target: str = "y_trend",
+    n_boot: int = 300,
+) -> pd.DataFrame:
+    """How the model's edge over the mean-reversion rule moves with the minimum-count rule.
+
+    Each threshold rebuilds the matrix, so the labelled rows change; at each one the default
+    XGBoost and the rule are scored on the same holdout rows, with a paired bootstrap interval
+    on the difference in macro-F1.
+    """
+    rows = []
+    for min_cases in values:
+        task = replace(cfg.task, min_cases=min_cases)
+        cfg_v = replace(cfg, task=task)
+        m = build_matrix(panel, task)
+        h = holdout_of(m, cfg_v, target)
+        proba, trees = final_fit_predict("xgboost", m, cfg_v, target)
+        rule = rule_as_proba(rule_predictions(m, cfg_v, target)["mean_reversion"])
+        diff = paired_bootstrap_diff(
+            h.y, proba, rule, macro_f1_from_proba, h.groups, n_boot, cfg.seed
+        )
+        rows.append(
+            {
+                "min_cases": min_cases,
+                "n_dev": int(dev_mask(m, cfg.split, target).sum()),
+                "n_test": len(h.y),
+                "model_f1": macro_f1_from_proba(h.y, proba),
+                "rule_f1": macro_f1_from_proba(h.y, rule),
+                "model_auc": auc_from_proba(h.y, proba),
+                "diff": diff["diff"],
+                "diff_lo": diff["lo"],
+                "diff_hi": diff["hi"],
+            }
+        )
+    return pd.DataFrame(rows)

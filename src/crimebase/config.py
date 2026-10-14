@@ -36,6 +36,7 @@ class Task:
     trend_band: float
     event_band: float
     max_ratio: float
+    non_crime_head_prefixes: tuple[str, ...]
     boundary_breaks: tuple[tuple[str, int], ...]
 
 
@@ -68,6 +69,7 @@ def load_config(path: str | Path | None = None) -> Config:
         trend_band=float(t["trend_band"]),
         event_band=float(t["event_band"]),
         max_ratio=float(t["max_ratio"]),
+        non_crime_head_prefixes=tuple(t["non_crime_head_prefixes"]),
         boundary_breaks=tuple((b["state"], int(b["year"])) for b in t["boundary_breaks"]),
     )
     s = raw["split"]

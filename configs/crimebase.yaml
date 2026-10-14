@@ -25,6 +25,9 @@ task:
   trend_band: 0.10                  # |growth| inside this band is "stable"
   event_band: 0.25                  # drop / surge thresholds for the binary views
   max_ratio: 10                     # next/this outside [1/max_ratio, max_ratio] is a definition break
+  non_crime_head_prefixes:          # police complaint-handling tables printed in IPC scope, not crime counts
+    - oral complaints
+    - category of complaints received
   boundary_breaks:                  # state territory changed between year and year+1
     - {state: AP, year: 2013}       # Telangana carved out in 2014
 

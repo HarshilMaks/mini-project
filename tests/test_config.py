@@ -11,6 +11,7 @@ def test_values_are_typed():
     cfg = load_config()
     assert cfg.task.min_cases == 50
     assert cfg.task.boundary_breaks == (("AP", 2013),)
+    assert "oral complaints" in cfg.task.non_crime_head_prefixes
     assert cfg.split.cv_windows[-1] == (2017, 2018)
     assert cfg.split.val_years == (2017, 2018)
 

@@ -1,0 +1,22 @@
+# environment
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# data: raw is committed (immutable input), everything derived is rebuilt
+data/interim/*
+data/processed/*
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# model binaries are rebuilt by the pipeline; metrics and reports are committed
+models/*
+!models/.gitkeep
+
+.DS_Store
+
+# training side-effects
+catboost_info/

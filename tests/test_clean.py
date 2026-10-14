@@ -1,6 +1,7 @@
 import pandas as pd
 
-from crimebase.clean import KEY, dedupe_metrics, head_key
+from crimebase.clean import KEY, PANEL_KEY, build_panel, dedupe_metrics, head_key
+from crimebase.config import load_config
 
 
 def test_head_key_merges_case_and_punctuation_variants():
@@ -83,3 +84,35 @@ def test_dedupe_passes_unique_rows_through():
     )
     assert len(out) == 3
     assert not out.duplicated(KEY).any()
+
+
+def test_build_panel_pivots_companions_and_drops_heads_without_main_metric():
+    task = load_config().task
+    df = pd.DataFrame(
+        [
+            row(120.0),
+            row(100.0, metric="persons_arrested"),
+            row(40.0, metric="victims", head_key="rape", cat="sexual_offence"),
+        ]
+    ).assign(crime_head=lambda d: d.head_key.str.upper())
+    panel = build_panel(df, task)
+    assert len(panel) == 1  # "rape" has no cases_registered row, so it is not a series
+    r = panel.iloc[0]
+    assert (r.cases, r.persons_arrested) == (120.0, 100.0)
+    assert pd.isna(r.victims) and pd.isna(r.persons_convicted)  # unreported companions stay NaN
+    assert list(panel.columns[:4]) == PANEL_KEY
+
+
+def test_build_panel_merges_spelling_variants_without_double_counting():
+    task = load_config().task
+    df = pd.DataFrame([row(120.0), row(120.0)]).assign(crime_head=["MURDER", "Murder"])
+    panel = build_panel(df, task)
+    assert len(panel) == 1 and panel.cases.iloc[0] == 120.0
+
+
+def test_build_panel_key_is_unique_and_sorted():
+    task = load_config().task
+    rows = [row(10.0 + y, year=y) for y in (2021, 2019, 2020)]
+    panel = build_panel(pd.DataFrame(rows).assign(crime_head="Murder"), task)
+    assert not panel.duplicated(PANEL_KEY).any()
+    assert list(panel.year) == [2019, 2020, 2021]

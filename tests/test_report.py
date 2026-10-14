@@ -1,0 +1,122 @@
+import numpy as np
+import pandas as pd
+
+from crimebase.report import (
+    by_year_table,
+    headline,
+    md_table,
+    paired_table,
+    scores_table,
+    sensitivity_sentence,
+    tuning_table,
+)
+from crimebase.results import SavedComparison
+
+
+def make_saved(tuned_edge_lo=0.003, tuned_vs_default=(-0.008, -0.015, -0.0004)):
+    cols = [
+        "macro_f1", "f1_lo", "f1_hi", "balanced_acc", "accuracy", "log_loss",
+        "auc_ovr", "auc_lo", "auc_hi", "trees",
+    ]  # fmt: skip
+    rows = {
+        "majority": [0.153, 0.145, 0.162, 0.333, 0.298, 1.107, 0.5, 0.5, 0.5, np.nan],
+        "persistence": [0.302, 0.285, 0.319, 0.318, 0.316, np.nan, np.nan, np.nan, np.nan, np.nan],
+        "mean_reversion": [
+            0.387,
+            0.371,
+            0.404,
+            0.403,
+            0.394,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+            np.nan,
+        ],
+        "xgboost_default": [0.417, 0.398, 0.434, 0.426, 0.424, 1.069, 0.609, 0.585, 0.630, 115],
+        "xgboost_tuned": [0.409, 0.391, 0.427, 0.418, 0.417, 1.065, 0.611, 0.589, 0.631, 181],
+    }
+    scores = pd.DataFrame.from_dict(rows, orient="index", columns=cols)
+    scores.index.name = "entry"
+    d, lo, hi = tuned_vs_default
+    paired = pd.DataFrame(
+        [
+            ("xgboost_tuned", "mean_reversion", "macro_f1", 0.022, tuned_edge_lo, 0.042, 0.98),
+            ("xgboost_tuned", "xgboost_default", "macro_f1", d, lo, hi, 0.02),
+        ],
+        columns=["a", "b", "metric", "diff", "lo", "hi", "p_a_better"],
+    )
+    tuning = {
+        "xgboost": {
+            "best_params": {"max_depth": 2},
+            "best_cv_log_loss": 1.0379,
+            "default_cv_log_loss": 1.0408,
+            "n_trials": 40,
+            "n_folds": 4,
+        }
+    }
+    return SavedComparison(scores, paired, tuning, pd.DataFrame(), {})
+
+
+def test_md_table_is_github_markdown():
+    text = md_table(pd.DataFrame({"A": ["x", "y"], "B": ["1", "2"]}))
+    assert text.splitlines() == ["| A | B |", "|---|---|", "| x | 1 |", "| y | 2 |"]
+
+
+def test_headline_leads_with_the_model_fixed_in_advance_and_quotes_the_numbers():
+    text = headline(make_saved())
+    assert text.startswith("The model fixed in advance, **tuned XGBoost**, scores **0.409**")
+    assert "(95% CI 0.391 to 0.427)" in text
+    assert "mean-reversion rule scores 0.387" in text and "scores 0.153" in text
+    assert "+0.022" in text and "(paired 95% CI +0.003 to +0.042)" in text
+    assert "no winner is picked" in text  # it does not crown the best test score
+
+
+def test_headline_verdict_follows_the_interval():
+    clear = headline(make_saved(tuned_edge_lo=0.003))
+    unclear = headline(make_saved(tuned_edge_lo=-0.004))
+    assert "an interval that excludes zero" in clear
+    assert "an interval that includes zero" in unclear
+    # tuning effect: [-0.015, -0.0004] excludes zero; [-0.015, +0.004] includes it
+    assert "which excludes zero" in clear
+    assert "which includes zero" in headline(make_saved(tuned_vs_default=(-0.005, -0.015, 0.004)))
+
+
+def test_headline_names_the_range_over_all_model_variants():
+    text = headline(make_saved())
+    assert "All 2 model variants land between 0.409 and 0.417" in text
+
+
+def test_scores_table_marks_rules_as_having_no_probability_metrics():
+    table = scores_table(make_saved()).set_index("Model")
+    assert table.loc["Mean-reversion rule", "AUC [95% CI]"] == "n/a"
+    assert table.loc["Mean-reversion rule", "Log loss"] == "n/a"
+    assert table.loc["XGBoost (tuned)", "AUC [95% CI]"] == "0.611 [0.589, 0.631]"
+    assert table.loc["XGBoost (tuned)", "Trees"] == "181"
+    assert table.loc["Majority class", "Trees"] == ""
+
+
+def test_paired_table_says_whether_zero_is_excluded():
+    table = paired_table(make_saved()).set_index("B")
+    assert table.loc["Mean-reversion rule", "Excludes 0"] == "yes"
+    assert table.loc["XGBoost (default)", "A - B [95% CI]"] == "-0.008 [-0.015, -0.000]"
+
+
+def test_tuning_table_reports_the_cv_gain():
+    row = tuning_table(make_saved()).iloc[0]
+    assert (row["Default CV log loss"], row["Tuned CV log loss"], row["Gain"]) == (
+        "1.0408", "1.0379", "0.0029",
+    )  # fmt: skip
+
+
+def test_sensitivity_sentence_splits_clear_from_unclear_thresholds():
+    sens = pd.DataFrame({"min_cases": [20, 50, 500], "diff_lo": [0.011, 0.011, -0.05]})
+    text = sensitivity_sentence(sens)
+    assert "clearly positive at min_cases = [20, 50]" in text
+    assert "includes zero at [500]" in text
+
+
+def test_by_year_table_labels_each_row_with_its_target_year():
+    table = by_year_table(pd.DataFrame({"mean_reversion": [0.389, 0.372]}, index=[2019, 2020]))
+    assert table["Year"].tolist() == ["2019 to 2020", "2020 to 2021"]
+    assert table["Mean-reversion rule"].tolist() == ["0.389", "0.372"]

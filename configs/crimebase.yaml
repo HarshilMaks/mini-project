@@ -1,0 +1,41 @@
+# Single source of truth for paths, thresholds, splits and seeds.
+# Paths are relative to the repository root.
+paths:
+  raw_zip: data/raw/india_crime_data.zip
+  interim: data/interim
+  processed: data/processed
+  models: models
+  metrics: reports/metrics
+  figures: reports/figures
+
+# File names inside the zip
+tables:
+  state_year: crime_state_year.csv
+  india_year: crime_india_year.csv
+  news: news.parquet
+
+task:
+  metric: cases_registered          # the series being forecast
+  companions:                       # same-year metrics joined as ratio features
+    - persons_arrested
+    - cases_chargesheeted
+    - persons_convicted
+    - victims
+  min_cases: 50                     # smallest count in year t for a row to get a label
+  trend_band: 0.10                  # |growth| inside this band is "stable"
+  event_band: 0.25                  # drop / surge thresholds for the binary views
+  max_ratio: 10                     # next/this outside [1/max_ratio, max_ratio] is a definition break
+  boundary_breaks:                  # state territory changed between year and year+1
+    - {state: AP, year: 2013}       # Telangana carved out in 2014
+
+split:
+  train_to: 2016                    # feature year t <= train_to is training data
+  val_years: [2017, 2018]
+  test_from: 2019                   # feature year t >= test_from is the held-out test
+  cv_windows:                       # expanding-window CV used for tuning (train = all t before the window)
+    - [2009, 2010]
+    - [2011, 2012]
+    - [2013, 2014]
+    - [2017, 2018]
+
+seed: 42

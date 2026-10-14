@@ -45,6 +45,9 @@ def cfg(tmp_path):
         interim=tmp_path / "interim",
         processed=tmp_path / "processed",
         metrics=tmp_path / "metrics",
+        figures=tmp_path / "figures",
+        models=tmp_path / "models",
+        report=tmp_path / "results.md",
     )
     return replace(base, paths=paths)
 

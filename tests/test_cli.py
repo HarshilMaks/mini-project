@@ -14,6 +14,9 @@ def config_file(cfg, tmp_path):  # noqa: F811
         interim=str(cfg.paths.interim),
         processed=str(cfg.paths.processed),
         metrics=str(cfg.paths.metrics),
+        figures=str(cfg.paths.figures),
+        models=str(cfg.paths.models),
+        report=str(cfg.paths.report),
     )
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw))
@@ -50,3 +53,25 @@ def test_cli_train_writes_metrics(config_file, cfg, capsys):  # noqa: F811
 def test_cli_train_rejects_an_unknown_model():
     with pytest.raises(SystemExit):
         main(["train", "--models", "random_forest"])
+
+
+def test_cli_sensitivity_then_report_write_the_deliverables(config_file, cfg, capsys):  # noqa: F811
+    run = lambda *a: main(["--config", str(config_file), *a])  # noqa: E731
+    run("clean")
+    run("features")
+    run("train", "--trials", "2", "--boot", "30", "--models", "xgboost", "lightgbm")
+    run("sensitivity", "--thresholds", "50", "300", "--boot", "30")
+    assert run("report") == 0
+    out = capsys.readouterr().out
+    assert "sensitivity: wrote" in out and "report: wrote" in out
+    text = cfg.paths.report.read_text()
+    assert text.startswith("# Results") and "Sensitivity to the minimum-count rule" in text
+    assert (cfg.paths.models / "y_trend_xgboost.json").exists()
+    figures = {p.name for p in cfg.paths.figures.iterdir()}
+    assert {"y_trend_scores.png", "y_trend_by_year.png", "y_trend_importance.png"} <= figures
+    assert (cfg.paths.metrics / "y_trend_sensitivity.csv").exists()
+
+
+def test_cli_sensitivity_without_a_panel_names_the_missing_stage(config_file):
+    with pytest.raises(FileNotFoundError, match="python -m crimebase clean"):
+        main(["--config", str(config_file), "sensitivity"])

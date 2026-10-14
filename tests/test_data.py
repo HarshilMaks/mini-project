@@ -43,6 +43,13 @@ def test_non_numeric_value_raises(tmp_path):
         load_state_year(cfg)
 
 
+def test_null_in_key_column_raises(tmp_path):
+    # pandas reads "n/a" as NaN, so the value column stays numeric but holds a null
+    cfg = make_cfg(tmp_path, {"crime_state_year.csv": GOOD_STATE_CSV.replace("120.0", "n/a")})
+    with pytest.raises(ValueError, match="nulls in key columns"):
+        load_state_year(cfg)
+
+
 def test_missing_member_and_missing_zip(tmp_path):
     cfg = make_cfg(tmp_path, {"other.csv": "a\n1\n"})
     with pytest.raises(KeyError, match="crime_state_year.csv"):

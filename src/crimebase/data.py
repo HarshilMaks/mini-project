@@ -47,23 +47,31 @@ def read_table(zip_path: Path, name: str) -> pd.DataFrame:
             return pd.read_csv(fh)
 
 
-def _require(df: pd.DataFrame, columns: set[str], name: str) -> pd.DataFrame:
+STATE_YEAR_KEYS = ["state_code", "year", "scope", "crime_head", "metric", "value"]
+INDIA_YEAR_KEYS = ["year", "scope", "crime_head", "metric", "value"]
+
+
+def _require(df: pd.DataFrame, columns: set[str], keys: list[str], name: str) -> pd.DataFrame:
     missing = columns - set(df.columns)
     if missing:
         raise ValueError(f"{name} is missing columns {sorted(missing)}")
     if not pd.api.types.is_numeric_dtype(df["value"]):
         raise ValueError(f"{name}: 'value' must be numeric, got {df['value'].dtype}")
+    nulls = df[keys].isna().sum()
+    nulls = nulls[nulls > 0]
+    if len(nulls):
+        raise ValueError(f"{name} has nulls in key columns: {nulls.to_dict()}")
     return df
 
 
 def load_state_year(cfg: Config) -> pd.DataFrame:
     df = read_table(cfg.paths.raw_zip, cfg.tables.state_year)
-    return _require(df, STATE_YEAR_COLUMNS, cfg.tables.state_year)
+    return _require(df, STATE_YEAR_COLUMNS, STATE_YEAR_KEYS, cfg.tables.state_year)
 
 
 def load_india_year(cfg: Config) -> pd.DataFrame:
     df = read_table(cfg.paths.raw_zip, cfg.tables.india_year)
-    return _require(df, INDIA_YEAR_COLUMNS, cfg.tables.india_year)
+    return _require(df, INDIA_YEAR_COLUMNS, INDIA_YEAR_KEYS, cfg.tables.india_year)
 
 
 def load_news(cfg: Config) -> pd.DataFrame:

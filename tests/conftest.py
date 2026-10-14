@@ -30,7 +30,7 @@ def make_panel(seed: int = 0, years=range(2005, 2021)) -> pd.DataFrame:
                             persons_arrested=float(round(level * 0.8)),
                             cases_chargesheeted=float(round(level * 0.7)),
                             persons_convicted=float(round(level * 0.1)),
-                            victims=np.nan,
+                            victims=float(round(level * 0.05)) if year % 2 == 0 else np.nan,
                         )
                     )
     panel = pd.DataFrame(rows)

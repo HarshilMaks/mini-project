@@ -50,3 +50,8 @@ def test_tuning_is_reproducible_for_a_seed(matrix, cfg):  # noqa: F811
     b = tune("lightgbm", matrix, cfg, n_trials=3, seed=5)
     assert a.best_params == b.best_params
     assert a.best_value == pytest.approx(b.best_value)
+
+
+def test_one_parameter_logreg_search_is_capped(matrix, cfg):  # noqa: F811
+    res = tune("logreg", matrix, cfg, n_trials=50)
+    assert len(res.trials) == 12

@@ -17,6 +17,9 @@ from crimebase.splits import cv_folds
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+# a one-parameter search converges long before 40 trials
+MAX_TRIALS = {"logreg": 12}
+
 
 def search_space(name: str, trial: optuna.Trial) -> dict[str, Any]:
     """Parameters to tune per model. Ranges bracket the DEFAULTS in models.py."""
@@ -96,6 +99,7 @@ def tune(
     seed: int | None = None,
 ) -> TuneResult:  # fmt: skip
     seed = cfg.seed if seed is None else seed
+    n_trials = min(n_trials, MAX_TRIALS.get(name, n_trials))
     folds = cv_folds(m, cfg.split, target)
     X, y = m[FEATURES], m[target]
 

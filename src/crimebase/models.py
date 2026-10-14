@@ -159,7 +159,12 @@ def _logreg(X: pd.DataFrame, p: dict[str, Any], seed: int) -> Pipeline:
                 "num",
                 Pipeline(
                     [
-                        ("impute", SimpleImputer(strategy="median", add_indicator=True)),
+                        (
+                            "impute",
+                            SimpleImputer(
+                                strategy="median", add_indicator=True, keep_empty_features=True
+                            ),
+                        ),
                         (
                             "quantile",
                             QuantileTransformer(

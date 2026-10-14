@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -84,3 +85,14 @@ def test_training_leaves_no_files_behind(data, tmp_path, monkeypatch):
     Xtr, ytr, Xva, yva, *_ = data
     fit("catboost", Xtr, ytr, Xva, yva)
     assert not list(Path(tmp_path).iterdir())  # no catboost_info/ in the working directory
+
+
+def test_logreg_survives_a_feature_with_no_observed_values_without_warning():
+    # in early time folds a metric (victims) can be entirely unreported
+    X, y = toy()
+    X = X.assign(x3=np.nan)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        model = fit("logreg", X.iloc[:1000], y[:1000])
+        proba = model.predict_proba(X.iloc[1000:1100])
+    assert proba.shape == (100, 3)

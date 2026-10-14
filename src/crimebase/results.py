@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from sklearn.metrics import f1_score
 
 from crimebase.config import Config
-from crimebase.evaluate import CLASS_NAMES
-from crimebase.experiment import Comparison
+from crimebase.evaluate import CLASS_NAMES, LABELS
+from crimebase.experiment import Comparison, rule_predictions
 
 ID_COLUMNS = ["state_code", "scope", "head_key", "year"]
 
@@ -93,3 +94,27 @@ def load_comparison(cfg: Config, target: str = "y_trend") -> SavedComparison:
         predictions=pd.read_parquet(_path(cfg, target, "holdout_predictions.parquet")),
         meta=json.loads(_path(cfg, target, "meta.json").read_text()),
     )
+
+
+def scores_by_year(saved: SavedComparison, m: pd.DataFrame, cfg: Config, entries: list[str]):
+    """Macro-F1 per held-out feature year for each entry (models or the two rules).
+
+    Rules are not stored in the predictions file, so they are rebuilt from the matrix, whose
+    holdout rows line up one-to-one with the saved predictions.
+    """
+    preds = saved.predictions
+    target = saved.meta["target"]
+    rules = rule_predictions(m, cfg, target)
+    out = {}
+    for entry in entries:
+        if entry in rules:
+            hard = pd.Series(rules[entry], index=preds.index)
+        else:
+            hard = pd.Series(saved.proba(entry).to_numpy().argmax(axis=1), index=preds.index)
+        out[entry] = {
+            year: f1_score(
+                g["y_true"], hard[g.index], labels=LABELS, average="macro", zero_division=0
+            )
+            for year, g in preds.groupby("year")
+        }
+    return pd.DataFrame(out).sort_index()

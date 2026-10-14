@@ -89,3 +89,23 @@ def test_loading_before_training_names_the_command(tmp_path):
     cfg = replace(cfg, paths=replace(cfg.paths, metrics=tmp_path))
     with pytest.raises(FileNotFoundError, match="python -m crimebase train"):
         load_comparison(cfg)
+
+
+def test_scores_by_year_covers_models_and_rules_and_matches_the_overall_score(saved):
+    from sklearn.metrics import f1_score
+
+    from crimebase.results import scores_by_year
+
+    cfg, m, cmp, back = saved
+    table = scores_by_year(back, m, cfg, ["mean_reversion", "xgboost_tuned"])
+    assert list(table.columns) == ["mean_reversion", "xgboost_tuned"]
+    assert list(table.index) == sorted(back.predictions.year.unique())
+    assert table.notna().all().all() and table.le(1).all().all()
+    # with one year only, the yearly score is the overall score
+    one = back.predictions[back.predictions.year == table.index[0]]
+    expected = f1_score(
+        one.y_true,
+        back.proba("xgboost_tuned").loc[one.index].to_numpy().argmax(axis=1),
+        average="macro",
+    )
+    assert table.loc[table.index[0], "xgboost_tuned"] == pytest.approx(expected)

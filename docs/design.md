@@ -51,9 +51,12 @@ configs/crimebase.yaml        all paths, thresholds, split years, seeds (the onl
 data/raw/                     immutable input zip (tracked)
 data/interim/                 cleaned panel (git-ignored, rebuilt)
 data/processed/               model matrix with labels (git-ignored, rebuilt)
-src/crimebase/                importable package: data, clean, features, splits, models, evaluate, report, cli
+src/crimebase/                importable package, one module per concern:
+                                data, clean, features, splits  (inputs to a model matrix)
+                                models, tuning, evaluate, experiment, results  (fit, score, persist)
+                                explain, viz, report  (interpretation and output)  pipeline, cli, config
 notebooks/                    01 understanding, 02 cleaning + dataset comparison, 03 XGBoost, 04 model comparison
-models/                       fitted model files (git-ignored)
+models/                       fitted model files, written by the report stage (git-ignored)
 reports/metrics/              metric JSON/CSV written by the pipeline (tracked)
 reports/figures/              PNGs used by the report (tracked)
 reports/results.md            generated summary, never hand-edited
@@ -68,7 +71,7 @@ Rules: code lives in `src/`, notebooks only orchestrate and explain; every outpu
 ```
 raw zip --ingest--> state_year table --clean--> panel.parquet --features--> model_matrix.parquet
                                                                                  |
-                                   reports/ <--report-- metrics <--train/evaluate-+
+              reports/results.md <--report-- reports/metrics <--train, sensitivity--+
 ```
 
 | Stage | Input | Output | Contract |
@@ -76,19 +79,22 @@ raw zip --ingest--> state_year table --clean--> panel.parquet --features--> mode
 | ingest | zip + config | DataFrame | columns match the data dictionary; failures raise, never fill |
 | clean | state-year table | `data/interim/panel.parquet` | unique key `(state_code, scope, head_key, year)`; metrics become columns |
 | features | panel | `data/processed/model_matrix.parquet` | one row per key; features from years <= t; labels from t+1; `eligible` + `reason` columns, nothing silently dropped |
-| train | matrix + config | `models/*`, `reports/metrics/*` | fit on train only; tune with time-ordered CV; test years touched once |
-| report | metrics | `reports/results.md`, figures | pure function of the metric files |
+| train | matrix + config | `reports/metrics/*` | fit on train only; tune with time-ordered CV; test years touched once |
+| sensitivity | panel + config | `reports/metrics/*_sensitivity.csv` | rebuilds the matrix at each `min_cases`; same rows for model and rule |
+| report | metrics + matrix | `reports/results.md`, `reports/figures/*`, `models/*` | every number computed from the metric files (plus one SHAP refit); nothing typed by hand |
 
 ### Cleaning rules (each backed by a measurement and a unit test)
 
 1. **Normalise head text** to `head_key` (lower-case, strip punctuation): 2,490 raw spellings become 2,144.
-2. **De-duplicate by max, never sum.** 97.5% of duplicate groups hold identical values; the 141 that differ are
-   parse glitches where the larger value is the real one (for example 695 vs 1). Summing would double-count.
+2. **De-duplicate by max, never sum.** 97.5% of duplicate groups hold identical values; in the 141 that differ
+   the larger value is never flagged `disputed` while the smaller one is in 68% of them (for example 695 vs 1),
+   so the larger is the consensus value. Summing would double-count.
 3. **Never aggregate across `scope`.** The scopes overlap (the data dictionary says so).
 4. **Pivot** `cases_registered`, `persons_arrested`, `cases_chargesheeted`, `persons_convicted`, `victims` to columns for the same key.
 5. **Eligibility for a label** (flagged, not deleted): next year present; `cases_registered >= min_cases`
    (Poisson noise is 1/sqrt(n), so below 100 cases it is already as large as the 10% band; the value is a
-   config setting and notebook 03 reports the sensitivity); growth ratio within [0.1, 10]
+   config setting and notebook 04 reports the sensitivity); not a police complaint-handling table (10 heads,
+   486 rows, 2013-2015, counts up to 8.9 million); growth ratio within [0.1, 10]
    (2.65% of pairs break this and the 99.9th percentile is 266x, which is a changed definition, not crime);
    no state boundary change (AP 2013->2014: the IPC total falls 218k -> 115k and the median head ratio is
    0.53 when Telangana is carved out; JK shows no break around Ladakh); and no `source` switch between the two years.
@@ -98,21 +104,22 @@ raw zip --ingest--> state_year table --clean--> panel.parquet --features--> mode
 Log level, 1-3 year log growth, 4-year mean/std/deviation and z-score, deviation from the expanding mean,
 history length; cross-state context for the same head and year (median growth, own growth relative to it,
 level relative to median, share of national count, number of reporting states); arrest, chargesheet,
-conviction and victim ratios; head flags (total / other / child); categoricals `scope`, `crime_category`, `state_code`, `source`.
+conviction and victim ratios; head flags (total / other / child) and the `disputed` flag; categoricals `scope`, `crime_category`, `state_code`, `source`.
 
 ## 5. Evaluation protocol
 
 * **Split by time**, never at random: train t <= 2016, validation 2017-2018, test t >= 2019 (targets 2020-2022, which includes the COVID shift).
 * **Tuning** uses expanding-window CV over earlier years; the test years are not used for any choice.
 * **Primary metric** macro-F1 (the stable class is the smallest); also balanced accuracy, accuracy, log loss, OvR ROC-AUC, per-class F1, per-test-year scores.
-* **Baselines**: majority class, persistence, mean reversion, logistic regression.
-* **Uncertainty**: bootstrap confidence intervals, so a 0.01 difference is not reported as a win.
+* **Baselines**: majority class, persistence, mean reversion, a one-feature table learned from last year's direction, and logistic regression.
+* **Uncertainty**: 95% percentile bootstrap that resamples whole state-year groups (rows of one state and year share shocks, so row-level resampling would be too optimistic), plus paired bootstraps on the same resamples for model-versus-model differences.
 
 ## 6. Model strategy
 
 XGBoost first (hist trees, native categoricals, early stopping, Optuna tuning). LightGBM and CatBoost are
 trained on the same folds, plus a soft-voting ensemble of the three. "Better than XGBoost" is decided by
-the test table and its intervals, not assumed. SHAP on the final XGBoost model for interpretation.
+the test table and its paired intervals, not assumed. Attributions come from XGBoost's built-in TreeSHAP
+(`pred_contribs`), which handles categorical features natively and is checked to add up to the raw margins.
 
 ## 7. Trade-offs and risks
 

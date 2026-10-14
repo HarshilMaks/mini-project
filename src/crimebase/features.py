@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from crimebase.config import Task
+
 SERIES = ["state_code", "scope", "head_key"]
 
 
@@ -75,4 +77,52 @@ def add_ratios_and_flags(df: pd.DataFrame) -> pd.DataFrame:
     out["is_total"] = out["head_key"].str.contains("total").astype("int8")
     out["is_other"] = out["head_key"].str.contains(r"\bother").astype("int8")
     out["is_child"] = out["head_key"].str.contains("child|minor|girl").astype("int8")
+    return out
+
+
+REASONS = [
+    "no_next_year",
+    "non_crime_head",
+    "below_min_cases",
+    "boundary_break",
+    "source_switch",
+    "definition_break",
+]
+
+
+def add_labels(df: pd.DataFrame, task: Task) -> pd.DataFrame:
+    """Attach next-year growth, an eligibility reason and the three labels.
+
+    Nothing is dropped: a row that cannot be labelled keeps `eligible=False` and the first
+    failing reason from `REASONS` (checked in that order), and its labels are NA.
+    `y_trend` is 0 down / 1 stable / 2 up around +-`trend_band`; `y_drop` and `y_surge`
+    are the binary views at +-`event_band`.
+    """
+    out = df.copy()
+    out["next_cases"] = value_at(out, "cases", 1)
+    next_source = value_at(out, "source", 1)
+    safe_cases = out["cases"].replace(0, np.nan)
+    ratio = out["next_cases"] / safe_cases
+    # (next - this) / this, not ratio - 1: 110/100 - 1 is 0.10000000000000009 and would
+    # tip a case that is exactly +10% over the strict band edge
+    out["growth"] = (out["next_cases"] - out["cases"]) / safe_cases
+
+    breaks = {f"{state}|{year}" for state, year in task.boundary_breaks}
+    state_year = out["state_code"] + "|" + out["year"].astype(str)
+    failing = [
+        out["next_cases"].isna(),
+        out["head_key"].str.startswith(tuple(task.non_crime_head_prefixes)),
+        out["cases"] < task.min_cases,
+        state_year.isin(breaks),
+        out["source"].to_numpy() != next_source,
+        (ratio > task.max_ratio) | (ratio < 1 / task.max_ratio),
+    ]
+    out["reason"] = np.select(failing, REASONS, default="ok")
+    out["eligible"] = out["reason"] == "ok"
+
+    growth = out["growth"].where(out["eligible"])
+    trend = np.where(growth > task.trend_band, 2, np.where(growth < -task.trend_band, 0, 1))
+    out["y_trend"] = pd.Series(trend, index=out.index).astype("Int8").where(out["eligible"])
+    out["y_drop"] = (growth < -task.event_band).astype("Int8").where(out["eligible"])
+    out["y_surge"] = (growth > task.event_band).astype("Int8").where(out["eligible"])
     return out

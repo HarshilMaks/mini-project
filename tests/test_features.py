@@ -1,8 +1,17 @@
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from crimebase.features import SERIES, add_context, add_history, add_ratios_and_flags
+from crimebase.config import load_config
+from crimebase.features import (
+    SERIES,
+    add_context,
+    add_history,
+    add_labels,
+    add_ratios_and_flags,
+)
 
 
 def one_series(years, cases, **over):
@@ -151,3 +160,124 @@ def test_head_flags():
     assert out.is_total.tolist() == [1, 0, 0, 0, 0]
     assert out.is_other.tolist() == [0, 1, 0, 0, 0]
     assert out.is_child.tolist() == [0, 0, 0, 1, 0]
+
+
+def labelled(rows, **task_over):
+    """rows: (head, cases_t, cases_t1[, state, source_t, source_t1]); one 2018->2019 pair each."""
+    task = replace(load_config().task, min_cases=50, **task_over)
+    frames = []
+    for i, r in enumerate(rows):
+        head, c0, c1 = r[:3]
+        state = r[3] if len(r) > 3 else "MH"
+        s0, s1 = (r[4], r[5]) if len(r) > 4 else ("state_table", "state_table")
+        frames.append(
+            pd.DataFrame(
+                {
+                    "state_code": state,
+                    "scope": "ipc",
+                    "head_key": head + str(i) if head == "x" else head,
+                    "year": [2018, 2019],
+                    "cases": [c0, c1],
+                    "source": [s0, s1],
+                }
+            )
+        )
+    out = add_labels(pd.concat(frames, ignore_index=True), task)
+    return out[out.year == 2018].reset_index(drop=True)
+
+
+def test_each_ineligibility_reason_triggers():
+    out = labelled(
+        [
+            ("murder", 100.0, 110.0),  # ok
+            ("oral complaints | total oral", 100.0, 110.0),  # not a crime head
+            ("theft", 10.0, 12.0),  # below min_cases
+            ("rape", 100.0, 110.0, "AP"),  # ok here; boundary only applies for year 2013
+            ("arson", 100.0, 110.0, "MH", "state_table", "district_total"),  # source switch
+            ("riots", 100.0, 2000.0),  # 20x jump is a definition break
+            ("fraud", 100.0, 0.0),  # fell to zero is a definition break too
+        ]
+    )
+    assert out.reason.tolist() == [
+        "ok",
+        "non_crime_head",
+        "below_min_cases",
+        "ok",
+        "source_switch",
+        "definition_break",
+        "definition_break",
+    ]
+
+
+def test_last_year_has_no_next_year_and_gaps_are_not_bridged():
+    df = pd.DataFrame(
+        {
+            "state_code": "MH",
+            "scope": "ipc",
+            "head_key": "murder",
+            "year": [2015, 2016, 2018],  # 2017 missing
+            "cases": [100.0, 100.0, 100.0],
+            "source": "state_table",
+        }
+    )
+    out = add_labels(df, load_config().task)
+    assert out.reason.tolist() == ["ok", "no_next_year", "no_next_year"]
+
+
+def test_boundary_break_flags_only_the_configured_state_year():
+    rows = [("murder", 100.0, 50.0, "AP"), ("murder", 100.0, 50.0, "KA")]
+    task = load_config().task
+    frames = [
+        pd.DataFrame(
+            {
+                "state_code": s,
+                "scope": "ipc",
+                "head_key": "murder",
+                "year": [2013, 2014],
+                "cases": [c0, c1],
+                "source": "state_table",
+            }
+        )
+        for _, c0, c1, s in rows
+    ]
+    out = add_labels(pd.concat(frames, ignore_index=True), task)
+    out = out[out.year == 2013].set_index("state_code")
+    assert out.loc["AP", "reason"] == "boundary_break"
+    assert out.loc["KA", "reason"] == "ok"
+
+
+def test_first_failing_reason_wins():
+    # below min_cases AND a 20x jump: min_cases is checked first
+    out = labelled([("theft", 10.0, 500.0)])
+    assert out.reason.iloc[0] == "below_min_cases"
+
+
+def test_trend_labels_and_band_edges():
+    out = labelled(
+        [
+            ("a", 100.0, 120.0),  # +20% up
+            ("b", 100.0, 80.0),  # -20% down
+            ("c", 100.0, 105.0),  # +5% stable
+            ("d", 100.0, 110.0),  # exactly +10% is still stable (strict band)
+            ("e", 100.0, 90.0),  # exactly -10% is still stable
+        ]
+    )
+    assert out.y_trend.tolist() == [2, 0, 1, 1, 1]
+
+
+def test_binary_views_use_the_wider_event_band():
+    out = labelled([("a", 100.0, 130.0), ("b", 100.0, 70.0), ("c", 100.0, 110.0)])
+    assert out.y_surge.tolist() == [1, 0, 0]
+    assert out.y_drop.tolist() == [0, 1, 0]
+
+
+def test_ineligible_rows_have_na_labels():
+    out = labelled([("theft", 10.0, 12.0)])
+    assert out.y_trend.isna().all() and out.y_drop.isna().all() and out.y_surge.isna().all()
+    assert not out.eligible.iloc[0]
+
+
+def test_growth_is_next_over_this_minus_one():
+    out = labelled([("a", 200.0, 250.0)])
+    assert out.growth.iloc[0] == pytest.approx(0.25)
+    assert out.next_cases.iloc[0] == 250.0

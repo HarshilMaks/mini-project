@@ -86,9 +86,13 @@ def apply_style() -> None:
 
 
 def _head(fig, ax, title: str, subtitle: str | None = None) -> None:
-    ax.set_title(title, color=INK, pad=22 if subtitle else 10)
+    """Title above an optional subtitle; both offsets are in points so tall figures stay tidy."""
+    ax.set_title(title, color=INK, pad=24 if subtitle else 10)
     if subtitle:
-        ax.text(0, 1.02, subtitle, transform=ax.transAxes, color=INK2, fontsize=9, va="bottom")
+        ax.annotate(
+            subtitle, xy=(0, 1), xycoords="axes fraction", xytext=(0, 5),
+            textcoords="offset points", color=INK2, fontsize=9, va="bottom",
+        )  # fmt: skip
 
 
 def save_figure(fig, path: str | Path) -> Path:

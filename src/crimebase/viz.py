@@ -353,6 +353,8 @@ def plot_lines(
         ax.axvline(x, color=AXIS, lw=0.8)
         ax.text(x, ax.get_ylim()[1], f" {note}", color=INK2, fontsize=8, va="top")
     ax.set_ylabel(ylabel)
+    if np.nanmax(table.to_numpy(dtype=float)) >= 10_000:
+        ax.yaxis.set_major_formatter(lambda v, _: f"{v:,.0f}")
     ax.legend(
         handles=[
             Line2D([], [], color=c, lw=2, ls=(0, (4, 3)) if col in dashed else "-", label=str(col))

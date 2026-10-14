@@ -131,3 +131,11 @@ def test_show_displays_a_png_and_closes_the_figure(monkeypatch):
     viz.show(fig)
     assert len(shown) == 1 and shown[0].data[:8] == b"\x89PNG\r\n\x1a\n"
     assert not viz.plt.fignum_exists(fig.number)
+
+
+def test_line_chart_uses_thousands_separators_for_large_values():
+    big = pd.DataFrame({"AP": [218015, 114604], "TS": [np.nan, 106830]}, index=[2013, 2014])
+    fig = viz.plot_lines(big, "t", "y")
+    fig.canvas.draw()
+    ticks = [t.get_text() for t in fig.axes[0].get_yticklabels() if t.get_text()]
+    assert any("," in t for t in ticks)

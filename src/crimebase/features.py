@@ -126,3 +126,26 @@ def add_labels(df: pd.DataFrame, task: Task) -> pd.DataFrame:
     out["y_drop"] = (growth < -task.event_band).astype("Int8").where(out["eligible"])
     out["y_surge"] = (growth > task.event_band).astype("Int8").where(out["eligible"])
     return out
+
+
+NUMERIC_FEATURES = [
+    "lv", "g1", "g2", "g3", "mean4", "std4", "dev4", "z4", "dev_exp", "n_hist",
+    "g1_med", "g1_rel", "lv_rel", "n_states", "share", "st_g1_mean", "st_nheads",
+    "arr_ratio", "cs_ratio", "conv_ratio", "vic_ratio",
+    "is_total", "is_other", "is_child", "disputed",
+]  # fmt: skip
+CATEGORICAL_FEATURES = ["scope", "crime_category", "state_code", "source"]
+FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
+LABELS = ["y_trend", "y_drop", "y_surge"]
+ID_COLUMNS = [*SERIES, "year"]
+
+
+def build_matrix(panel: pd.DataFrame, task: Task) -> pd.DataFrame:
+    """Chain every step into the model matrix: ids, features, labels and eligibility."""
+    out = add_labels(add_ratios_and_flags(add_context(add_history(panel))), task)
+    out["disputed"] = out["disputed"].astype("int8")
+    for col in CATEGORICAL_FEATURES:
+        out[col] = out[col].astype("category")
+    # state_code and scope are both ids and categorical features; list each column once
+    keep = [*ID_COLUMNS, *FEATURES, "cases", "next_cases", "growth", *LABELS, "reason", "eligible"]
+    return out[list(dict.fromkeys(keep))]

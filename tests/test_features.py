@@ -6,11 +6,16 @@ import pytest
 
 from crimebase.config import load_config
 from crimebase.features import (
+    CATEGORICAL_FEATURES,
+    FEATURES,
+    ID_COLUMNS,
+    LABELS,
     SERIES,
     add_context,
     add_history,
     add_labels,
     add_ratios_and_flags,
+    build_matrix,
 )
 
 
@@ -281,3 +286,31 @@ def test_growth_is_next_over_this_minus_one():
     out = labelled([("a", 200.0, 250.0)])
     assert out.growth.iloc[0] == pytest.approx(0.25)
     assert out.next_cases.iloc[0] == 250.0
+
+
+def test_build_matrix_contract(panel):
+    task = load_config().task
+    m = build_matrix(panel, task)
+    assert len(m) == len(panel)
+    assert m.columns.is_unique
+    assert not m.duplicated(ID_COLUMNS).any()
+    assert set(FEATURES) <= set(m.columns) and set(LABELS) <= set(m.columns)
+    assert all(m[c].dtype == "category" for c in CATEGORICAL_FEATURES)
+    assert m.disputed.dtype == "int8"
+    assert m.eligible.any() and (~m.eligible).any()
+    # labels exist exactly where rows are eligible
+    assert m.y_trend.notna().equals(m.eligible)
+
+
+def test_build_matrix_features_do_not_depend_on_the_future(panel):
+    cutoff = 2014
+    task = load_config().task
+    base = build_matrix(panel, task)
+    shifted = panel.copy()
+    shifted.loc[shifted.year > cutoff, "cases"] *= 7
+    other = build_matrix(shifted, task)
+    keep = base.year <= cutoff
+    cols = [*ID_COLUMNS, *FEATURES]
+    pd.testing.assert_frame_equal(
+        base.loc[keep, cols].reset_index(drop=True), other.loc[keep, cols].reset_index(drop=True)
+    )

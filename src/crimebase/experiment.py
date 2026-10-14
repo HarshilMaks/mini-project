@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,15 +11,20 @@ import pandas as pd
 
 from crimebase.config import Config
 from crimebase.evaluate import (
+    auc_from_proba,
     binned_proba,
+    bootstrap_ci,
+    macro_f1_from_proba,
     mean_reversion_pred,
     multiclass_scores,
+    paired_bootstrap_diff,
     persistence_pred,
     prior_proba,
 )
 from crimebase.features import FEATURES
-from crimebase.models import fit
+from crimebase.models import MODEL_NAMES, fit
 from crimebase.splits import dev_mask, holdout_mask, train_mask, val_mask
+from crimebase.tuning import TuneResult, tune
 
 
 @dataclass
@@ -100,3 +106,95 @@ def baseline_results(
 def rule_as_proba(pred: np.ndarray) -> np.ndarray:
     """A hard rule prediction as a proper probability matrix, so it can be bootstrapped."""
     return np.eye(3)[pred] * 0.94 + 0.02
+
+
+ENSEMBLE_MEMBERS = ["xgboost", "lightgbm", "catboost"]
+RULES = ("persistence", "mean_reversion")
+# (a, b): is a better than b? Only pairs whose two sides were run are reported.
+PAIRS = [
+    ("xgboost_tuned", "mean_reversion"),
+    ("xgboost_tuned", "xgboost_default"),
+    ("xgboost_tuned", "logreg_tuned"),
+    ("lightgbm_tuned", "xgboost_tuned"),
+    ("catboost_tuned", "xgboost_tuned"),
+    ("ensemble", "xgboost_tuned"),
+]
+
+
+@dataclass
+class Comparison:
+    """Everything the report needs from one run, all measured on the held-out years."""
+
+    target: str
+    holdout: Holdout
+    scores: pd.DataFrame  # one row per entry: metrics, 95% intervals, tree count
+    probas: dict[str, np.ndarray]  # holdout probabilities for every entry that has them
+    tuning: dict[str, TuneResult]
+    paired: pd.DataFrame  # paired bootstrap differences between entries
+
+
+def run_comparison(
+    m: pd.DataFrame,
+    cfg: Config,
+    target: str = "y_trend",
+    n_trials: int = 40,
+    models: tuple[str, ...] = tuple(MODEL_NAMES),
+    n_boot: int = 500,
+    log: Callable[[str], None] | None = None,
+) -> Comparison:
+    """Baselines, default and tuned models, and a soft-voting ensemble, scored on the holdout."""
+    log = log or (lambda msg: None)
+    h = holdout_of(m, cfg, target)
+    scores, probas = baseline_results(m, cfg, target)
+    rules = rule_predictions(m, cfg, target)
+    trees: dict[str, int | None] = {}
+    tuning: dict[str, TuneResult] = {}
+
+    for name in models:
+        log(f"{name}: default parameters")
+        probas[f"{name}_default"], trees[f"{name}_default"] = final_fit_predict(
+            name, m, cfg, target
+        )
+        log(f"{name}: tuning {n_trials} trials over {len(cfg.split.cv_windows)} time folds")
+        tuning[name] = tune(name, m, cfg, target, n_trials)
+        probas[f"{name}_tuned"], trees[f"{name}_tuned"] = final_fit_predict(
+            name, m, cfg, target, tuning[name].best_params
+        )
+    members = [f"{n}_tuned" for n in ENSEMBLE_MEMBERS if n in models]
+    if len(members) >= 2:
+        probas["ensemble"] = np.mean([probas[k] for k in members], axis=0)
+        log(f"ensemble of {', '.join(members)}")
+
+    for name, proba in probas.items():
+        if name not in scores:
+            scores[name] = multiclass_scores(h.y, proba=proba)
+
+    order = ["majority", *RULES, "binned_g1"]
+    order += [f"{name}_{kind}" for name in models for kind in ("default", "tuned")]
+    order += ["ensemble"] if "ensemble" in probas else []
+    table = pd.DataFrame.from_dict(scores, orient="index").loc[order]
+    table.index.name = "entry"
+    for entry in table.index:
+        proba = probas.get(entry, rule_as_proba(rules[entry]) if entry in rules else None)
+        lo, hi = bootstrap_ci(h.y, proba, macro_f1_from_proba, h.groups, n_boot, cfg.seed)
+        table.loc[entry, ["f1_lo", "f1_hi"]] = lo, hi
+        if entry in probas:
+            lo, hi = bootstrap_ci(h.y, probas[entry], auc_from_proba, h.groups, n_boot, cfg.seed)
+            table.loc[entry, ["auc_lo", "auc_hi"]] = lo, hi
+        table.loc[entry, "trees"] = trees.get(entry, np.nan)
+
+    def scorable(entry: str) -> np.ndarray:
+        return probas[entry] if entry in probas else rule_as_proba(rules[entry])
+
+    rows = []
+    for a, b in PAIRS:
+        if a not in table.index or b not in table.index:
+            continue
+        for metric_name, fn in (("macro_f1", macro_f1_from_proba), ("auc_ovr", auc_from_proba)):
+            if metric_name == "auc_ovr" and (a in rules or b in rules):
+                continue  # hard rules have no probabilities, so no AUC
+            diff = paired_bootstrap_diff(
+                h.y, scorable(a), scorable(b), fn, h.groups, n_boot, cfg.seed
+            )
+            rows.append({"a": a, "b": b, "metric": metric_name, **diff})
+    return Comparison(target, h, table, probas, tuning, pd.DataFrame(rows))

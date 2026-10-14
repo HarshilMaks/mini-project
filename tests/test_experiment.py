@@ -70,3 +70,97 @@ def test_rule_predictions_are_mirror_images_on_directional_rows(matrix, cfg):  #
     assert both.any()
     assert (rules["persistence"][both] == 2 - rules["mean_reversion"][both]).all()
     assert len(rules["persistence"]) == len(h.y)
+
+
+@pytest.fixture(scope="module")
+def comparison():
+    """One small end-to-end run (xgboost + lightgbm, 2 trials) shared by the tests below."""
+    from crimebase.experiment import run_comparison
+
+    base = load_config()
+    cfg = replace(
+        base,
+        split=replace(
+            base.split,
+            train_to=2013,
+            val_years=(2014, 2015),
+            test_from=2016,
+            cv_windows=((2010, 2011), (2012, 2013), (2014, 2015)),
+        ),
+    )
+    from conftest import make_panel
+    from crimebase.features import build_matrix
+
+    m = build_matrix(make_panel(), cfg.task)
+    messages = []
+    cmp = run_comparison(
+        m, cfg, models=("xgboost", "lightgbm"), n_trials=2, n_boot=40, log=messages.append
+    )
+    return cmp, messages
+
+
+def test_comparison_rows_are_baselines_then_models_then_ensemble(comparison):
+    cmp, _ = comparison
+    assert list(cmp.scores.index) == [
+        "majority",
+        "persistence",
+        "mean_reversion",
+        "binned_g1",
+        "xgboost_default",
+        "xgboost_tuned",
+        "lightgbm_default",
+        "lightgbm_tuned",
+        "ensemble",
+    ]
+    assert {"macro_f1", "f1_lo", "f1_hi", "auc_ovr", "auc_lo", "auc_hi", "trees"} <= set(
+        cmp.scores.columns
+    )
+
+
+def test_intervals_are_ordered_and_rules_have_no_auc(comparison):
+    cmp, _ = comparison
+    assert (cmp.scores.f1_lo <= cmp.scores.f1_hi).all()
+    assert cmp.scores.loc["mean_reversion", ["auc_ovr", "auc_lo", "auc_hi"]].isna().all()
+    assert cmp.scores.loc["xgboost_tuned", "auc_lo"] <= cmp.scores.loc["xgboost_tuned", "auc_hi"]
+
+
+def test_tuning_never_scores_worse_than_defaults_on_cv(comparison):
+    cmp, _ = comparison
+    assert set(cmp.tuning) == {"xgboost", "lightgbm"}
+    assert all(t.best_value <= t.default_value for t in cmp.tuning.values())
+
+
+def test_ensemble_is_the_mean_of_the_tuned_members(comparison):
+    cmp, _ = comparison
+    expected = (cmp.probas["xgboost_tuned"] + cmp.probas["lightgbm_tuned"]) / 2
+    assert np.allclose(cmp.probas["ensemble"], expected)
+
+
+def test_paired_rows_exist_only_for_pairs_that_were_run(comparison):
+    cmp, _ = comparison
+    pairs = {(r.a, r.b, r.metric) for r in cmp.paired.itertuples()}
+    assert ("xgboost_tuned", "mean_reversion", "macro_f1") in pairs
+    assert ("xgboost_tuned", "mean_reversion", "auc_ovr") not in pairs  # a rule has no AUC
+    assert ("xgboost_tuned", "xgboost_default", "auc_ovr") in pairs
+    assert ("ensemble", "xgboost_tuned", "macro_f1") in pairs
+    assert not any(
+        "catboost" in a or "logreg" in a or "catboost" in b or "logreg" in b for a, b, _ in pairs
+    )
+
+
+def test_paired_difference_equals_the_difference_of_scores(comparison):
+    cmp, _ = comparison
+    row = cmp.paired.query(
+        "a == 'xgboost_tuned' and b == 'xgboost_default' and metric == 'macro_f1'"
+    ).iloc[0]
+    s = cmp.scores
+    assert row["diff"] == pytest.approx(
+        s.loc["xgboost_tuned", "macro_f1"] - s.loc["xgboost_default", "macro_f1"]
+    )
+    assert row.lo <= row.hi and 0 <= row.p_a_better <= 1
+
+
+def test_progress_messages_name_each_step(comparison):
+    _, messages = comparison
+    assert any("xgboost: tuning 2 trials" in msg for msg in messages)
+    assert any(msg.startswith("ensemble") for msg in messages)

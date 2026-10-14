@@ -22,6 +22,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, QuantileTransformer
 from sklearn.utils.class_weight import compute_sample_weight
+from threadpoolctl import threadpool_limits
 
 N_CLASSES = 3
 N_JOBS = os.cpu_count() or 1
@@ -137,7 +138,9 @@ def fit(
         best = int(model.get_best_iteration()) + 1 if stop else trees
     else:
         model, best = _logreg(X_train, p, seed), None
-        model.fit(X_train, y_train, clf__sample_weight=weights)
+        # these matrices are tiny; one BLAS thread is ~6x faster than four fighting over them
+        with threadpool_limits(limits=1):
+            model.fit(X_train, y_train, clf__sample_weight=weights)
     return Fitted(name, model, best)
 
 

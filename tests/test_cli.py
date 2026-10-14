@@ -13,6 +13,7 @@ def config_file(cfg, tmp_path):  # noqa: F811
         raw_zip=str(cfg.paths.raw_zip),
         interim=str(cfg.paths.interim),
         processed=str(cfg.paths.processed),
+        metrics=str(cfg.paths.metrics),
     )
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw))
@@ -30,3 +31,22 @@ def test_cli_runs_stages_in_order(config_file, capsys):
 def test_cli_rejects_unknown_stage():
     with pytest.raises(SystemExit):
         main(["nonsense"])
+
+
+def test_cli_train_writes_metrics(config_file, cfg, capsys):  # noqa: F811
+    main(["--config", str(config_file), "clean"])
+    main(["--config", str(config_file), "features"])
+    code = main(
+        ["--config", str(config_file), "train", "--trials", "2", "--boot", "30",
+         "--models", "xgboost", "lightgbm"]
+    )  # fmt: skip
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "xgboost: tuning 2 trials" in out and "train: wrote" in out
+    written = {p.name for p in cfg.paths.metrics.iterdir()}
+    assert {"y_trend_scores.csv", "y_trend_tuning.json", "y_trend_meta.json"} <= written
+
+
+def test_cli_train_rejects_an_unknown_model():
+    with pytest.raises(SystemExit):
+        main(["train", "--models", "random_forest"])

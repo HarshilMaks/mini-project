@@ -44,6 +44,7 @@ def cfg(tmp_path):
         raw_zip=zip_path,
         interim=tmp_path / "interim",
         processed=tmp_path / "processed",
+        metrics=tmp_path / "metrics",
     )
     return replace(base, paths=paths)
 

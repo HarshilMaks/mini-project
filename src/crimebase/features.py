@@ -59,3 +59,20 @@ def add_context(df: pd.DataFrame) -> pd.DataFrame:
     out["st_g1_mean"] = state_year["g1"].transform("mean")
     out["st_nheads"] = state_year["head_key"].transform("nunique")
     return out
+
+
+def add_ratios_and_flags(df: pd.DataFrame) -> pd.DataFrame:
+    """Same-year justice-pipeline ratios and coarse head-label flags.
+
+    Companion metrics are often unreported (NaN), and a NaN stays NaN so tree models can
+    use the missingness. The +1 keeps a zero denominator finite.
+    """
+    out = df.copy()
+    out["arr_ratio"] = out["persons_arrested"] / (out["cases"] + 1)
+    out["cs_ratio"] = out["cases_chargesheeted"] / (out["cases"] + 1)
+    out["conv_ratio"] = out["persons_convicted"] / (out["persons_arrested"] + 1)
+    out["vic_ratio"] = out["victims"] / (out["cases"] + 1)
+    out["is_total"] = out["head_key"].str.contains("total").astype("int8")
+    out["is_other"] = out["head_key"].str.contains(r"\bother").astype("int8")
+    out["is_child"] = out["head_key"].str.contains("child|minor|girl").astype("int8")
+    return out

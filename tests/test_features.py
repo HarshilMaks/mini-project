@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from crimebase.features import SERIES, add_context, add_history
+from crimebase.features import SERIES, add_context, add_history, add_ratios_and_flags
 
 
 def one_series(years, cases, **over):
@@ -116,3 +116,38 @@ def test_context_features_do_not_depend_on_the_future(panel):
         base.loc[keep, [*SERIES, "year", *cols]].reset_index(drop=True),
         other.loc[keep, [*SERIES, "year", *cols]].reset_index(drop=True),
     )
+
+
+def test_ratios_use_plus_one_and_keep_missing_as_nan():
+    df = pd.DataFrame(
+        {
+            "head_key": ["murder", "murder"],
+            "cases": [99.0, 0.0],
+            "persons_arrested": [198.0, 0.0],
+            "cases_chargesheeted": [49.0, np.nan],
+            "persons_convicted": [19.0, np.nan],
+            "victims": [np.nan, 5.0],
+        }
+    )
+    out = add_ratios_and_flags(df)
+    assert out.arr_ratio.tolist() == [pytest.approx(1.98), 0.0]
+    assert out.cs_ratio[0] == pytest.approx(0.49) and np.isnan(out.cs_ratio[1])
+    assert out.conv_ratio[0] == pytest.approx(0.0955, abs=1e-3) and np.isnan(out.conv_ratio[1])
+    assert np.isnan(out.vic_ratio[0]) and out.vic_ratio[1] == pytest.approx(5.0)
+    assert np.isfinite(out[["arr_ratio"]]).all().all()
+
+
+def test_head_flags():
+    heads = [
+        "total cognizable ipc crimes",
+        "other ipc crimes",
+        "mother in law cruelty",  # contains "other" inside a word, so not an "other" head
+        "kidnapping of children",
+        "murder",
+    ]
+    cols = ["cases", "persons_arrested", "cases_chargesheeted", "persons_convicted", "victims"]
+    df = pd.DataFrame({"head_key": heads, **dict.fromkeys(cols, 1.0)})
+    out = add_ratios_and_flags(df)
+    assert out.is_total.tolist() == [1, 0, 0, 0, 0]
+    assert out.is_other.tolist() == [0, 1, 0, 0, 0]
+    assert out.is_child.tolist() == [0, 0, 0, 1, 0]

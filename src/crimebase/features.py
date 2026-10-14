@@ -39,3 +39,23 @@ def add_history(panel: pd.DataFrame) -> pd.DataFrame:
     out["dev_exp"] = out["lv"] - expanding_mean
     out["n_hist"] = by_series.cumcount()
     return out
+
+
+def add_context(df: pd.DataFrame) -> pd.DataFrame:
+    """Cross-sectional context at year t.
+
+    Compares a state with the same head in other states, and with its own other heads.
+    Every statistic groups rows of one year only, so nothing from t+1 leaks in.
+    """
+    out = df.copy()
+    head_year = out.groupby(["scope", "head_key", "year"])
+    out["g1_med"] = head_year["g1"].transform("median")
+    out["g1_rel"] = out["g1"] - out["g1_med"]
+    out["lv_rel"] = out["lv"] - head_year["lv"].transform("median")
+    out["n_states"] = head_year["state_code"].transform("nunique")
+    out["share"] = out["cases"] / head_year["cases"].transform("sum").replace(0, np.nan)
+
+    state_year = out.groupby(["state_code", "scope", "year"])
+    out["st_g1_mean"] = state_year["g1"].transform("mean")
+    out["st_nheads"] = state_year["head_key"].transform("nunique")
+    return out

@@ -19,6 +19,7 @@ class Paths:
     models: Path
     metrics: Path
     figures: Path
+    report: Path
 
 
 @dataclass(frozen=True)

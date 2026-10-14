@@ -7,6 +7,7 @@ paths:
   models: models
   metrics: reports/metrics
   figures: reports/figures
+  report: reports/results.md
 
 # File names inside the zip
 tables:

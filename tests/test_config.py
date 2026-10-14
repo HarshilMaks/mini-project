@@ -7,6 +7,12 @@ def test_paths_resolve_against_repo_root():
     assert cfg.paths.raw_zip.exists()
 
 
+def test_report_goes_next_to_the_metrics_and_figures():
+    paths = load_config().paths
+    assert paths.report == ROOT / "reports" / "results.md"
+    assert paths.metrics.parent == paths.figures.parent == paths.report.parent
+
+
 def test_values_are_typed():
     cfg = load_config()
     assert cfg.task.min_cases == 50

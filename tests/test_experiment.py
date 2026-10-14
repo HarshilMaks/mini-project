@@ -164,3 +164,14 @@ def test_progress_messages_name_each_step(comparison):
     _, messages = comparison
     assert any("xgboost: tuning 2 trials" in msg for msg in messages)
     assert any(msg.startswith("ensemble") for msg in messages)
+
+
+def test_final_fit_returns_the_model_that_final_fit_predict_uses(matrix, cfg):  # noqa: F811
+    from crimebase.experiment import final_fit
+    from crimebase.features import FEATURES
+
+    model, trees = final_fit("xgboost", matrix, cfg, "y_trend")
+    te = holdout_mask(matrix, cfg.split, "y_trend")
+    proba, trees2 = final_fit_predict("xgboost", matrix, cfg, "y_trend")
+    assert trees == trees2 and model.best_iteration == trees
+    assert np.allclose(model.predict_proba(matrix.loc[te, FEATURES]), proba)

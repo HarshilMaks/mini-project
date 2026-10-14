@@ -22,7 +22,7 @@ from crimebase.evaluate import (
     prior_proba,
 )
 from crimebase.features import FEATURES
-from crimebase.models import MODEL_NAMES, fit
+from crimebase.models import MODEL_NAMES, Fitted, fit
 from crimebase.splits import dev_mask, holdout_mask, train_mask, val_mask
 from crimebase.tuning import TuneResult, tune
 
@@ -49,21 +49,28 @@ def holdout_of(m: pd.DataFrame, cfg: Config, target: str) -> Holdout:
     )
 
 
+def final_fit(
+    name: str, m: pd.DataFrame, cfg: Config, target: str, params: dict[str, Any] | None = None
+) -> tuple[Fitted, int | None]:
+    """Fit `name` the way the report does; return the final model and its tree count.
+
+    1. Train on the training years and early-stop on the validation years to fix the tree
+       count. 2. Refit on train + validation with that count. The held-out years play no part.
+    """
+    X, y, s = m[FEATURES], m[target], cfg.split
+    tr, va, dev = (f(m, s, target) for f in (train_mask, val_mask, dev_mask))
+    stopped = fit(name, X[tr], y[tr], X[va], y[va], params, cfg.seed)
+    trees = stopped.best_iteration
+    return fit(name, X[dev], y[dev], params=params, seed=cfg.seed, n_estimators=trees), trees
+
+
 def final_fit_predict(
     name: str, m: pd.DataFrame, cfg: Config, target: str, params: dict[str, Any] | None = None
 ) -> tuple[np.ndarray, int | None]:
-    """Fit `name` the way the report does and return its holdout probabilities.
-
-    1. Train on the training years and early-stop on the validation years to fix the tree
-       count. 2. Refit on train + validation with that count. 3. Predict the held-out years,
-       which no earlier step has seen.
-    """
-    X, y, s = m[FEATURES], m[target], cfg.split
-    tr, va, dev, te = (f(m, s, target) for f in (train_mask, val_mask, dev_mask, holdout_mask))
-    stopped = fit(name, X[tr], y[tr], X[va], y[va], params, cfg.seed)
-    trees = stopped.best_iteration
-    final = fit(name, X[dev], y[dev], params=params, seed=cfg.seed, n_estimators=trees)
-    return final.predict_proba(X[te]), trees
+    """`final_fit`, then predict the held-out years once (no earlier step has seen them)."""
+    final, trees = final_fit(name, m, cfg, target, params)
+    te = holdout_mask(m, cfg.split, target)
+    return final.predict_proba(m.loc[te, FEATURES]), trees
 
 
 def rule_predictions(

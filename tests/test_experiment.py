@@ -59,3 +59,14 @@ def test_baselines_report_probabilities_only_where_they_have_them(matrix, cfg): 
 def test_rule_as_proba_is_a_valid_probability_matrix():
     p = rule_as_proba(np.array([0, 1, 2, 2]))
     assert np.allclose(p.sum(axis=1), 1) and (p.argmax(axis=1) == [0, 1, 2, 2]).all()
+
+
+def test_rule_predictions_are_mirror_images_on_directional_rows(matrix, cfg):  # noqa: F811
+    from crimebase.experiment import rule_predictions
+
+    rules = rule_predictions(matrix, cfg)
+    h = holdout_of(matrix, cfg, "y_trend")
+    both = (rules["persistence"] != 1) & (rules["mean_reversion"] != 1)
+    assert both.any()
+    assert (rules["persistence"][both] == 2 - rules["mean_reversion"][both]).all()
+    assert len(rules["persistence"]) == len(h.y)

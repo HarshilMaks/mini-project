@@ -60,6 +60,20 @@ def final_fit_predict(
     return final.predict_proba(X[te]), trees
 
 
+def rule_predictions(
+    m: pd.DataFrame, cfg: Config, target: str = "y_trend"
+) -> dict[str, np.ndarray]:
+    """Hard predictions of the two fixed rules on the holdout, from last year's growth."""
+    s, band = cfg.split, cfg.task.trend_band
+    y_dev = m.loc[dev_mask(m, s, target), target].astype(int).to_numpy()
+    g1_te = m.loc[holdout_mask(m, s, target), "g1"]
+    fallback = int(np.bincount(y_dev).argmax())
+    return {
+        "persistence": persistence_pred(g1_te, band, fallback),
+        "mean_reversion": mean_reversion_pred(g1_te, band, fallback),
+    }
+
+
 def baseline_results(
     m: pd.DataFrame, cfg: Config, target: str = "y_trend"
 ) -> tuple[dict[str, dict[str, float]], dict[str, np.ndarray]]:
@@ -72,18 +86,14 @@ def baseline_results(
     dev, te = dev_mask(m, s, target), holdout_mask(m, s, target)
     y_dev = m.loc[dev, target].astype(int).to_numpy()
     y_te = m.loc[te, target].astype(int).to_numpy()
-    g1_te = m.loc[te, "g1"]
-    fallback = int(np.bincount(y_dev).argmax())
 
     probas = {
         "majority": prior_proba(y_dev, len(y_te)),
-        "binned_g1": binned_proba(m.loc[dev, "g1"], y_dev, g1_te, band),
+        "binned_g1": binned_proba(m.loc[dev, "g1"], y_dev, m.loc[te, "g1"], band),
     }
     scores = {name: multiclass_scores(y_te, proba=p) for name, p in probas.items()}
-    scores["persistence"] = multiclass_scores(y_te, pred=persistence_pred(g1_te, band, fallback))
-    scores["mean_reversion"] = multiclass_scores(
-        y_te, pred=mean_reversion_pred(g1_te, band, fallback)
-    )
+    for name, pred in rule_predictions(m, cfg, target).items():
+        scores[name] = multiclass_scores(y_te, pred=pred)
     return scores, probas
 
 

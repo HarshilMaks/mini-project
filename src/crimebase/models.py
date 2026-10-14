@@ -162,7 +162,11 @@ def _logreg(X: pd.DataFrame, p: dict[str, Any], seed: int) -> Pipeline:
                         ("impute", SimpleImputer(strategy="median", add_indicator=True)),
                         (
                             "quantile",
-                            QuantileTransformer(output_distribution="normal", random_state=seed),
+                            QuantileTransformer(
+                                n_quantiles=min(1000, len(X)),
+                                output_distribution="normal",
+                                random_state=seed,
+                            ),
                         ),
                     ]
                 ),

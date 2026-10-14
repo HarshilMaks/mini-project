@@ -129,3 +129,28 @@ def test_auc_from_proba_matches_the_score_dictionary_and_is_bootstrappable():
     assert auc_from_proba(y, proba) == pytest.approx(multiclass_scores(y, proba=proba)["auc_ovr"])
     lo, hi = bootstrap_ci(y, proba, auc_from_proba, np.arange(300) // 3, n_boot=100)
     assert lo < auc_from_proba(y, proba) < hi
+
+
+def test_macro_f1_from_proba_handles_a_sample_missing_a_class_without_warning():
+    import warnings
+
+    y = np.array([0, 0, 2, 2])  # no "stable" rows and none predicted
+    proba = ONE_HOT[y] * 0.94 + 0.02
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert macro_f1_from_proba(y, proba) == pytest.approx(2 / 3)
+
+
+def test_auc_is_nan_without_warning_when_a_class_is_missing_and_intervals_degrade_to_nan():
+    import warnings
+
+    y = np.array([0, 0, 2, 2, 0, 2])
+    proba = ONE_HOT[y] * 0.94 + 0.02
+    groups = np.arange(6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert np.isnan(auc_from_proba(y, proba))
+        lo, hi = bootstrap_ci(y, proba, auc_from_proba, groups, n_boot=20)
+        diff = paired_bootstrap_diff(y, proba, proba, auc_from_proba, groups, n_boot=20)
+    assert np.isnan(lo) and np.isnan(hi)
+    assert np.isnan(diff["lo"]) and np.isnan(diff["p_a_better"]) and np.isnan(diff["diff"])

@@ -127,9 +127,13 @@ def bootstrap_ci(
     for _ in range(n_boot):
         idx = _resample_indices(groups, rng)
         try:
-            values.append(metric(y_true[idx], scores[idx]))
-        except ValueError:  # a resample missing a class makes AUC undefined; skip it
+            value = metric(y_true[idx], scores[idx])
+        except ValueError:  # a resample missing a class can make a metric undefined
             continue
+        if not np.isnan(value):
+            values.append(value)
+    if not values:
+        return float("nan"), float("nan")
     lo, hi = np.quantile(values, [(1 - level) / 2, 1 - (1 - level) / 2])
     return float(lo), float(hi)
 
@@ -149,13 +153,18 @@ def paired_bootstrap_diff(
     for _ in range(n_boot):
         idx = _resample_indices(groups, rng)
         try:
-            diffs.append(metric(y_true[idx], a[idx]) - metric(y_true[idx], b[idx]))
+            d = metric(y_true[idx], a[idx]) - metric(y_true[idx], b[idx])
         except ValueError:
             continue
+        if not np.isnan(d):
+            diffs.append(d)
+    point = float(metric(y_true, a) - metric(y_true, b))
+    if not diffs:
+        return {"diff": point, "lo": float("nan"), "hi": float("nan"), "p_a_better": float("nan")}
     diffs = np.asarray(diffs)
     lo, hi = np.quantile(diffs, [0.025, 0.975])
     return {
-        "diff": float(metric(y_true, a) - metric(y_true, b)),
+        "diff": point,
         "lo": float(lo),
         "hi": float(hi),
         "p_a_better": float((diffs > 0).mean()),
@@ -163,9 +172,16 @@ def paired_bootstrap_diff(
 
 
 def macro_f1_from_proba(y_true, proba) -> float:
-    return f1_score(y_true, np.asarray(proba).argmax(axis=1), labels=LABELS, average="macro")
+    """Macro-F1 of the argmax class; a class absent from a small sample scores 0 quietly."""
+    pred = np.asarray(proba).argmax(axis=1)
+    return f1_score(y_true, pred, labels=LABELS, average="macro", zero_division=0)
 
 
 def auc_from_proba(y_true, proba) -> float:
-    """One-vs-rest ROC-AUC averaged over the three classes (bootstrap-friendly signature)."""
+    """One-vs-rest ROC-AUC averaged over the three classes (bootstrap-friendly signature).
+
+    NaN when a class is absent from `y_true`, where AUC is undefined.
+    """
+    if len(np.unique(y_true)) < len(LABELS):
+        return float("nan")
     return float(roc_auc_score(y_true, np.asarray(proba), multi_class="ovr", labels=LABELS))

@@ -2,10 +2,14 @@ import numpy as np
 import pandas as pd
 
 from crimebase.report import (
+    _num,
+    _signed,
     by_year_table,
+    drivers_sentence,
     headline,
     md_table,
     paired_table,
+    prediction_mix_sentence,
     scores_table,
     sensitivity_sentence,
     tuning_table,
@@ -99,7 +103,7 @@ def test_scores_table_marks_rules_as_having_no_probability_metrics():
 def test_paired_table_says_whether_zero_is_excluded():
     table = paired_table(make_saved()).set_index("B")
     assert table.loc["Mean-reversion rule", "Excludes 0"] == "yes"
-    assert table.loc["XGBoost (default)", "A - B [95% CI]"] == "-0.008 [-0.015, -0.000]"
+    assert table.loc["XGBoost (default)", "A - B [95% CI]"] == "-0.008 [-0.015, -0.0004]"
 
 
 def test_tuning_table_reports_the_cv_gain():
@@ -120,3 +124,41 @@ def test_by_year_table_labels_each_row_with_its_target_year():
     table = by_year_table(pd.DataFrame({"mean_reversion": [0.389, 0.372]}, index=[2019, 2020]))
     assert table["Year"].tolist() == ["2019 to 2020", "2020 to 2021"]
     assert table["Mean-reversion rule"].tolist() == ["0.389", "0.372"]
+
+
+def test_numbers_get_a_fourth_decimal_only_when_three_would_print_minus_zero():
+    assert _num(0.0223) == "0.022" and _num(-0.008) == "-0.008" and _num(0) == "0.000"
+    assert _num(-0.0004) == "-0.0004" and _num(0.0003) == "0.0003"
+    assert _signed(0.022) == "+0.022" and _signed(-0.0004) == "-0.0004"
+
+
+def test_headline_never_prints_a_zero_that_hides_the_sign():
+    import re
+
+    text = headline(make_saved())
+    assert not re.search(r"-0\.000(?!\d)", text)  # a bare "-0.000" would hide how small it is
+    assert "-0.0004" in text
+
+
+def test_drivers_sentence_names_the_top_features_and_the_rank_of_last_years_growth():
+    imp = pd.DataFrame(
+        {"total": [0.09, 0.08, 0.07, 0.009]}, index=["lv", "crime_category", "mean4", "g1"]
+    )
+    text = drivers_sentence(imp)
+    assert "`lv`, `crime_category` and `mean4`" in text
+    assert "ranks 4 of 4" in text
+
+
+def test_prediction_mix_compares_predicted_with_actual_shares():
+    y = np.array([0, 0, 1, 2])
+    proba = np.eye(3)[[0, 0, 0, 0]]  # always predicts down
+    text = prediction_mix_sentence(y, proba)
+    assert "down 50%, stable 25%, up 25%" in text
+    assert "down 100%, stable 0%, up 0%" in text
+
+
+def test_markdown_tables_never_contain_a_stray_pipe_in_a_header():
+    from crimebase.report import md_table
+
+    table = md_table(pd.DataFrame({"Feature": ["lv"], "Mean abs. SHAP": ["0.088"]}))
+    assert all(line.count("|") == 3 for line in table.splitlines())

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from crimebase.config import Config
@@ -41,8 +42,17 @@ def md_table(df: pd.DataFrame) -> str:
     return "\n".join([head, rule, *rows])
 
 
-def _ci(value: float, lo: float, hi: float, digits: int = 3) -> str:
-    return f"{value:.{digits}f} [{lo:.{digits}f}, {hi:.{digits}f}]"
+def _num(v: float) -> str:
+    """Three decimals, or four when the value is so small that three would print -0.000."""
+    return f"{v:.3f}" if abs(v) >= 0.0005 or v == 0 else f"{v:.4f}"
+
+
+def _signed(v: float) -> str:
+    return ("+" if v > 0 else "") + _num(v)
+
+
+def _ci(value: float, lo: float, hi: float) -> str:
+    return f"{_num(value)} [{_num(lo)}, {_num(hi)}]"
 
 
 def scores_table(saved: SavedComparison) -> pd.DataFrame:
@@ -71,7 +81,7 @@ def paired_table(saved: SavedComparison) -> pd.DataFrame:
                 "A": label(r.a),
                 "B": label(r.b),
                 "Metric": "macro-F1" if r.metric == "macro_f1" else "AUC",
-                "A - B [95% CI]": _ci(r.diff, r.lo, r.hi, 3),
+                "A - B [95% CI]": _ci(r.diff, r.lo, r.hi),
                 "Excludes 0": "yes" if (r.lo > 0 or r.hi < 0) else "no",
             }
         )
@@ -129,8 +139,9 @@ def headline(saved: SavedComparison) -> str:
     vs_rule = _paired(saved, "xgboost_tuned", "mean_reversion")
     if vs_rule is not None:
         lines.append(
-            f"XGBoost beats that rule by {vs_rule['diff']:+.3f} macro-F1 (paired 95% CI "
-            f"{vs_rule.lo:+.3f} to {vs_rule.hi:+.3f}), an interval that {_verdict(vs_rule)} zero."
+            f"XGBoost beats that rule by {_signed(vs_rule['diff'])} macro-F1 (paired 95% CI "
+            f"{_signed(vs_rule.lo)} to {_signed(vs_rule.hi)}), an interval that "
+            f"{_verdict(vs_rule)} zero."
         )
     lines.append(
         f"All {len(models)} model variants land between {low:.3f} and {high:.3f}; naming the "
@@ -139,8 +150,9 @@ def headline(saved: SavedComparison) -> str:
     tuning = _paired(saved, "xgboost_tuned", "xgboost_default")
     if tuning is not None:
         lines.append(
-            f"Tuning moved held-out macro-F1 by {tuning['diff']:+.3f} "
-            f"(paired CI {tuning.lo:+.3f} to {tuning.hi:+.3f}, which {_verdict(tuning)} zero)."
+            f"Tuning moved held-out macro-F1 by {_signed(tuning['diff'])} "
+            f"(paired CI {_signed(tuning.lo)} to {_signed(tuning.hi)}, which "
+            f"{_verdict(tuning)} zero)."
         )
     return " ".join(lines)
 
@@ -154,6 +166,28 @@ def sensitivity_sentence(sens: pd.DataFrame) -> str:
     if unclear:
         parts.append(f"its interval includes zero at {unclear}")
     return "At the thresholds tried, " + " and ".join(parts) + "."
+
+
+def drivers_sentence(imp: pd.DataFrame) -> str:
+    """Which features the model leans on, and where last year's own growth ranks."""
+    names = list(imp.index)
+    top = names[:3]
+    text = f"The three features the model leans on most are `{top[0]}`, `{top[1]}` and `{top[2]}`."
+    if "g1" in names:
+        text += f" Last year's own growth (`g1`) ranks {names.index('g1') + 1} of {len(names)}."
+    return text
+
+
+def prediction_mix_sentence(y_true, proba) -> str:
+    """How the predicted class mix compares with the actual one on the held-out rows."""
+    y_true = np.asarray(y_true)
+    pred = np.asarray(proba).argmax(axis=1)
+    actual = np.bincount(y_true, minlength=3) / len(y_true)
+    guessed = np.bincount(pred, minlength=3) / len(pred)
+    names = ("down", "stable", "up")
+    a = ", ".join(f"{n} {v:.0%}" for n, v in zip(names, actual, strict=True))
+    g = ", ".join(f"{n} {v:.0%}" for n, v in zip(names, guessed, strict=True))
+    return f"Actual mix of the held-out rows: {a}. Mix the model predicted: {g}."
 
 
 def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
@@ -201,7 +235,7 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
 
     top = imp.head(10)
     top_table = pd.DataFrame(
-        {"Feature": top.index, "Mean |SHAP|": [f"{v:.3f}" for v in top["total"]]}
+        {"Feature": top.index, "Mean abs. SHAP": [f"{v:.3f}" for v in top["total"]]}
     )
     text = [
         "# Results: year-ahead crime trend by state and crime head",
@@ -253,9 +287,17 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
         "",
         f"![Confusion matrix]({FIG}/{target}_confusion.png)",
         "",
+        prediction_mix_sentence(h.y, saved.proba("xgboost_tuned").to_numpy()),
+        "",
         "## What drives it (TreeSHAP)",
         "",
+        drivers_sentence(imp),
+        "",
         md_table(top_table),
+        "",
+        "`lv` is the log of this year's count, `mean4` and `std4` the mean and spread of the "
+        "last four years of log counts, `g1` last year's log growth and `g1_rel` that growth "
+        "relative to other states for the same head.",
         "",
         f"![Feature importance]({FIG}/{target}_importance.png)",
         "",

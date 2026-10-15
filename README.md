@@ -28,8 +28,8 @@ Evaluation is strictly time-ordered: train on feature years up to 2016, tune on 
 * XGBoost beats the rule by **+0.022** macro-F1 (paired 95% CI +0.003 to +0.042). A real edge, but a modest one:
   AUC is about 0.61, where 0.50 is chance.
 * **XGBoost is enough.** LightGBM, CatBoost, logistic regression and an ensemble were tried on the same split;
-  none beats it by a margin that survives a paired test. Tuning improved cross-validation slightly and the
-  held-out score not at all. The limit is the data, not the algorithm.
+  none beats it by a margin that survives a paired test. Tuning improved cross-validation slightly but moved
+  the held-out score by -0.008. The limit is the data, not the algorithm.
 * What the model uses is mostly *what kind of series* it is (level, crime category, state, volatility), not
   last year's growth.
 

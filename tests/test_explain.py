@@ -66,3 +66,15 @@ def test_signed_effect_skips_constant_features_without_a_warning(trained):
         warnings.simplefilter("error")
         effect = signed_effect(contrib, flat, class_index=2)
     assert "x2" not in effect.index and "x1" in effect.index
+
+
+def test_signed_effect_omits_a_feature_that_never_moves_the_class_without_a_warning(trained):
+    import warnings
+
+    model, X = trained
+    contrib = contributions(model, X).copy()
+    contrib[:, 2, list(X.columns).index("x2")] = 0.0  # x2 contributes nothing to class "up"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        effect = signed_effect(contrib, X, class_index=2)
+    assert "x2" not in effect.index and "x1" in effect.index

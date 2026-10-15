@@ -154,3 +154,62 @@ def test_auc_is_nan_without_warning_when_a_class_is_missing_and_intervals_degrad
         diff = paired_bootstrap_diff(y, proba, proba, auc_from_proba, groups, n_boot=20)
     assert np.isnan(lo) and np.isnan(hi)
     assert np.isnan(diff["lo"]) and np.isnan(diff["p_a_better"]) and np.isnan(diff["diff"])
+
+
+def test_classification_table_matches_a_hand_computed_example():
+    from crimebase.evaluate import classification_table
+
+    y = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 2])
+    pred = np.array([0, 0, 1, 1, 1, 2, 2, 2, 0, 1])
+    t = classification_table(y, pred)
+    assert list(t.index) == ["down", "stable", "up", "accuracy", "macro avg", "weighted avg"]
+    assert list(t.columns) == ["precision", "recall", "f1-score", "support"]
+    # down: predicted 3 times (2 right) out of 3 true -> precision 2/3, recall 2/3
+    assert t.loc["down", "precision"] == pytest.approx(2 / 3)
+    assert t.loc["down", "recall"] == pytest.approx(2 / 3)
+    # stable: predicted 4 times (2 right), 2 true -> precision 1/2, recall 1
+    assert t.loc["stable", "precision"] == pytest.approx(0.5)
+    assert t.loc["stable", "recall"] == pytest.approx(1.0)
+    assert t.loc["up", "support"] == 5 and t.loc["accuracy", "f1-score"] == pytest.approx(0.7)
+    assert t.loc["macro avg", "recall"] == pytest.approx((2 / 3 + 1 + 3 / 5) / 3)
+    assert t.loc["weighted avg", "support"] == 10
+
+
+def test_classification_table_agrees_with_scikit_learn():
+    from sklearn.metrics import classification_report
+
+    from crimebase.evaluate import classification_table
+
+    rng = np.random.default_rng(3)
+    y = rng.integers(0, 3, 400)
+    pred = np.where(rng.random(400) < 0.5, y, rng.integers(0, 3, 400))
+    ref = pd.DataFrame(
+        classification_report(y, pred, target_names=["down", "stable", "up"], output_dict=True)
+    ).T
+    mine = classification_table(y, pred)
+    for row in ["down", "stable", "up", "macro avg", "weighted avg"]:
+        for col in ["precision", "recall", "f1-score"]:
+            assert mine.loc[row, col] == pytest.approx(ref.loc[row, col])
+    assert mine.loc["accuracy", "f1-score"] == pytest.approx(ref.loc["accuracy", "precision"])
+
+
+def test_scores_carry_macro_precision_and_recall():
+    y = np.array([0, 0, 1, 2])
+    s = multiclass_scores(y, pred=np.array([0, 1, 1, 2]))
+    assert s["precision_macro"] == pytest.approx((1 + 0.5 + 1) / 3)
+    assert s["recall_macro"] == pytest.approx((0.5 + 1 + 1) / 3)
+    assert s["recall_macro"] == s["balanced_acc"]
+
+
+def test_roc_points_give_one_curve_per_class_with_the_matching_auc():
+    from crimebase.evaluate import roc_points
+
+    rng = np.random.default_rng(0)
+    y, proba = make_scores(500, 0.6, rng)
+    pts = roc_points(y, proba)
+    assert list(pts) == ["down", "stable", "up"]
+    for fpr, tpr, auc in pts.values():
+        assert fpr[0] == 0 and tpr[0] == 0 and fpr[-1] == 1 and tpr[-1] == 1
+        assert 0.5 < auc < 1.0
+    mean_auc = np.mean([auc for _, _, auc in pts.values()])
+    assert mean_auc == pytest.approx(multiclass_scores(y, proba=proba)["auc_ovr"])

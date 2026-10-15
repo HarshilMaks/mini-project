@@ -13,7 +13,9 @@ from sklearn.metrics import (
     brier_score_loss,
     f1_score,
     log_loss,
+    precision_recall_fscore_support,
     roc_auc_score,
+    roc_curve,
 )
 
 CLASS_NAMES = ["down", "stable", "up"]
@@ -33,9 +35,13 @@ def multiclass_scores(y_true, proba=None, pred=None) -> dict[str, float]:
     pred = np.asarray(pred)
     per_class = f1_score(y_true, pred, labels=LABELS, average=None, zero_division=0)
     scores = {
+        "accuracy": accuracy_score(y_true, pred),
+        "precision_macro": precision_recall_fscore_support(
+            y_true, pred, labels=LABELS, average="macro", zero_division=0
+        )[0],
+        "recall_macro": balanced_accuracy_score(y_true, pred),  # macro recall is balanced accuracy
         "macro_f1": f1_score(y_true, pred, labels=LABELS, average="macro", zero_division=0),
         "balanced_acc": balanced_accuracy_score(y_true, pred),
-        "accuracy": accuracy_score(y_true, pred),
         **{f"f1_{name}": float(f) for name, f in zip(CLASS_NAMES, per_class, strict=True)},
         "log_loss": np.nan,
         "auc_ovr": np.nan,
@@ -185,3 +191,39 @@ def auc_from_proba(y_true, proba) -> float:
     if len(np.unique(y_true)) < len(LABELS):
         return float("nan")
     return float(roc_auc_score(y_true, np.asarray(proba), multi_class="ovr", labels=LABELS))
+
+
+def classification_table(y_true, pred) -> pd.DataFrame:
+    """Per-class precision, recall, F1 and support, laid out like scikit-learn's report.
+
+    Rows: down, stable, up, then accuracy, macro average and weighted average.
+    """
+    p, r, f, n = precision_recall_fscore_support(
+        y_true, pred, labels=LABELS, average=None, zero_division=0
+    )
+    table = pd.DataFrame(
+        {"precision": p, "recall": r, "f1-score": f, "support": n}, index=CLASS_NAMES
+    )
+    total = int(n.sum())
+    macro = precision_recall_fscore_support(
+        y_true, pred, labels=LABELS, average="macro", zero_division=0
+    )
+    weighted = precision_recall_fscore_support(
+        y_true, pred, labels=LABELS, average="weighted", zero_division=0
+    )
+    table.loc["accuracy"] = [np.nan, np.nan, accuracy_score(y_true, pred), total]
+    table.loc["macro avg"] = [*macro[:3], total]
+    table.loc["weighted avg"] = [*weighted[:3], total]
+    table["support"] = table["support"].astype(int)
+    return table
+
+
+def roc_points(y_true, proba) -> dict[str, tuple[np.ndarray, np.ndarray, float]]:
+    """One-vs-rest ROC curve per class: {class: (false positive rate, true positive rate, AUC)}."""
+    y_true, proba = np.asarray(y_true), np.asarray(proba)
+    out = {}
+    for k, name in enumerate(CLASS_NAMES):
+        hit = (y_true == k).astype(int)
+        fpr, tpr, _ = roc_curve(hit, proba[:, k])
+        out[name] = (fpr, tpr, float(roc_auc_score(hit, proba[:, k])))
+    return out

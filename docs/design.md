@@ -22,13 +22,15 @@ Profiling found that most "obvious" classification targets are unusable:
 **Chosen task: year-ahead trend of registered cases.** For a state/UT and crime head in year *t*,
 predict how `cases_registered` moves in *t+1*: `down` (< -10%), `stable` (within +-10%) or `up` (> +10%).
 It is non-circular (the label comes from future counts, not from a rule), multi-class, time-ordered and
-hard enough to need real validation. Two binary views reuse the same features: `drop` (< -25%) and
-`surge` (> +25%).
+hard enough to need real validation. The matrix also carries two binary labels, `y_drop` (< -25%) and
+`y_surge` (> +25%), built from the same features; no model is trained on them yet (an early-warning
+framing is the obvious next step).
 
-Honest expectation, measured before building: on a strict time split XGBoost, LightGBM and CatBoost all
-land near 0.43 accuracy / 0.62 OvR-AUC, about level with a one-line mean-reversion rule. Reported crime
-counts are noisy, so the report compares against baselines and gives confidence intervals instead of
-claiming accuracy.
+**What it turned out to support** (measured, see `reports/results.md`): tuned XGBoost scores macro-F1 0.409
+on the 2019+ holdout against 0.387 for a one-line mean-reversion rule, a paired difference of +0.022 (95% CI
++0.003 to +0.042) with AUC about 0.61. LightGBM, CatBoost, logistic regression and a soft-voting ensemble
+are not distinguishable from XGBoost, and tuning did not improve the held-out score. Reported crime counts
+are noisy, so every model is compared with the rule and with confidence intervals, not with chance.
 
 ## 2. Requirements
 
@@ -40,7 +42,7 @@ Functional
 Non-functional
 * Reproducible: `uv sync` then one command per stage; fixed seeds; locked dependencies.
 * No leakage: features use only years <= *t*; evaluation is time-ordered.
-* Runs on 4 CPUs / 15 GB RAM with no GPU; full pipeline in minutes.
+* Runs on 4 CPUs / 15 GB RAM with no GPU: `clean` and `features` take seconds, the full tuned comparison about 40 minutes.
 
 Constraints: a Git repo with a 100 MB file limit (the zip is 52 MB, the extracted CSV is 113 MB, so data stays zipped).
 

@@ -40,6 +40,12 @@ from crimebase.viz import (
 )
 
 FIG = "figures"
+MODEL_TITLES = {
+    "xgboost": "XGBoost",
+    "lightgbm": "LightGBM",
+    "catboost": "CatBoost",
+    "logreg": "Logistic regression",
+}
 
 
 def md_table(df: pd.DataFrame) -> str:
@@ -133,7 +139,7 @@ def paired_table(saved: SavedComparison) -> pd.DataFrame:
             {
                 "A": label(r.a),
                 "B": label(r.b),
-                "Metric": "macro-F1" if r.metric == "macro_f1" else "AUC",
+                "Metric": "macro-F1" if r.metric == "macro_f1" else "ROC-AUC",
                 "A - B [95% CI]": _ci(r.diff, r.lo, r.hi),
                 "Excludes 0": "yes" if (r.lo > 0 or r.hi < 0) else "no",
             }
@@ -147,7 +153,7 @@ def tuning_table(saved: SavedComparison) -> pd.DataFrame:
         gain = t["default_cv_log_loss"] - t["best_cv_log_loss"]
         rows.append(
             {
-                "Model": name,
+                "Model": MODEL_TITLES.get(name, name),
                 "Trials": t["n_trials"],
                 "Default CV log loss": f"{t['default_cv_log_loss']:.4f}",
                 "Tuned CV log loss": f"{t['best_cv_log_loss']:.4f}",

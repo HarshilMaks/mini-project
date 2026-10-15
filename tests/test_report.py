@@ -163,11 +163,13 @@ def test_split_table_labels_each_split_with_its_years_and_rows():
 def test_paired_table_says_whether_zero_is_excluded():
     table = paired_table(make_saved()).set_index("B")
     assert table.loc["Mean-reversion rule", "Excludes 0"] == "yes"
+    assert set(paired_table(make_saved())["Metric"]) == {"macro-F1"}
     assert table.loc["XGBoost (default)", "A - B [95% CI]"] == "-0.008 [-0.015, -0.0004]"
 
 
 def test_tuning_table_reports_the_cv_gain():
     row = tuning_table(make_saved()).iloc[0]
+    assert row["Model"] == "XGBoost"
     assert (row["Default CV log loss"], row["Tuned CV log loss"], row["Gain"]) == (
         "1.0408", "1.0379", "0.0029",
     )  # fmt: skip

@@ -54,3 +54,15 @@ def test_importance_handles_a_pandas_feature_list(trained):
     model, X = trained
     imp = importance(contributions(model, X), list(X.columns))
     assert isinstance(imp, pd.DataFrame) and set(imp.index) == set(X.columns)
+
+
+def test_signed_effect_skips_constant_features_without_a_warning(trained):
+    import warnings
+
+    model, X = trained
+    contrib = contributions(model, X)
+    flat = X.assign(x2=0.0)  # same columns, but x2 no longer varies
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        effect = signed_effect(contrib, flat, class_index=2)
+    assert "x2" not in effect.index and "x1" in effect.index

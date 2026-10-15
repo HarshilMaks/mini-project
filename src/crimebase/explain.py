@@ -34,13 +34,14 @@ def signed_effect(contrib: np.ndarray, X: pd.DataFrame, class_index: int) -> pd.
     """For each numeric feature, how a high value pushes one class.
 
     Returns the rank correlation between the feature's value and its SHAP value for the
-    class: positive means higher values push the class up, negative means down. A tree
-    model has no single sign, so this is a summary, not a coefficient.
+    class (constant features are skipped). Positive means higher values push the class up,
+    negative means down. A tree model has no single sign, so this is a summary, not a
+    coefficient.
     """
     rows = {}
     for j, col in enumerate(X.columns):
-        if isinstance(X[col].dtype, pd.CategoricalDtype):
-            continue
+        if isinstance(X[col].dtype, pd.CategoricalDtype) or X[col].nunique() < 2:
+            continue  # categories have no order; a constant feature has no correlation
         shap_col = pd.Series(contrib[:, class_index, j], index=X.index)
         rows[col] = X[col].corr(shap_col, method="spearman")
     return pd.Series(rows, name=CLASS_NAMES[class_index]).dropna().to_frame()

@@ -197,3 +197,17 @@ def test_min_cases_sensitivity_changes_the_labelled_rows_and_reports_paired_diff
     assert table.n_test.iloc[0] > table.n_test.iloc[1]  # a higher bar leaves fewer rows
     assert (table.diff_lo <= table.diff_hi).all()
     assert np.allclose(table["diff"], table.model_f1 - table.rule_f1)
+
+
+def test_split_performance_scores_one_model_on_train_validation_and_test(matrix, cfg):  # noqa: F811
+    from crimebase.experiment import split_performance
+
+    table = split_performance(matrix, cfg)
+    assert list(table.index) == ["Train", "Validation", "Test"]
+    assert {"years", "rows", "accuracy", "precision_macro", "recall_macro", "macro_f1"} <= set(
+        table.columns
+    )
+    assert table.loc["Train", "rows"] > table.loc["Validation", "rows"] > 0
+    assert table.loc["Test", "years"].startswith(str(cfg.split.test_from))
+    # the training rows were seen by the model: it should not do worse there than on test
+    assert table.loc["Train", "log_loss"] <= table.loc["Test", "log_loss"] + 0.05

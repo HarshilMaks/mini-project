@@ -245,3 +245,32 @@ def min_cases_sensitivity(
             }
         )
     return pd.DataFrame(rows)
+
+
+def split_performance(
+    m: pd.DataFrame,
+    cfg: Config,
+    target: str = "y_trend",
+    name: str = "xgboost",
+    params: dict[str, Any] | None = None,
+) -> pd.DataFrame:
+    """One model scored on its training, validation and test rows: the overfitting check.
+
+    The model is fitted on the training years and early-stopped on the validation years, so all
+    three rows come from the same fitted model. The headline held-out scores refit on train +
+    validation first, so they are not the same numbers as this table's test row (more recent
+    training data helps when the test years differ from the training years).
+    """
+    X, y, s = m[FEATURES], m[target], cfg.split
+    tr, va, te = (f(m, s, target) for f in (train_mask, val_mask, holdout_mask))
+    model = fit(name, X[tr], y[tr], X[va], y[va], params, cfg.seed)
+    rows = {}
+    for label, mask in (("Train", tr), ("Validation", va), ("Test", te)):
+        years = m.loc[mask, "year"]
+        scores = multiclass_scores(y[mask].astype(int), proba=model.predict_proba(X[mask]))
+        rows[label] = {
+            "years": f"{years.min()}-{years.max()}",
+            "rows": int(mask.sum()),
+            **scores,
+        }
+    return pd.DataFrame(rows).T

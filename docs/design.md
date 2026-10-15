@@ -28,8 +28,9 @@ framing is the obvious next step).
 
 **What it turned out to support** (measured, see `reports/results.md`): tuned XGBoost scores macro-F1 0.409
 on the 2019+ holdout against 0.387 for a one-line mean-reversion rule, a paired difference of +0.022 (95% CI
-+0.003 to +0.042) with AUC about 0.61. LightGBM, CatBoost, logistic regression and a soft-voting ensemble
-are not distinguishable from XGBoost, and tuning did not improve the held-out score. Reported crime counts
++0.003 to +0.042) with AUC about 0.61. None of the alternatives beats it in a paired test: LightGBM and a
+soft-voting ensemble are indistinguishable from it, CatBoost and the tuned logistic regression are slightly
+worse, and tuning did not improve the held-out score. Reported crime counts
 are noisy, so every model is compared with the rule and with confidence intervals, not with chance.
 
 ## 2. Requirements

@@ -217,3 +217,18 @@ def test_class_metrics_chart_prints_every_value_and_the_class_support():
         "recall",
         "f1-score",
     ]
+
+
+def test_show_table_adds_a_caption_and_prints_missing_values_as_a_dash(monkeypatch):
+    import IPython.display
+
+    shown = []
+    monkeypatch.setattr(IPython.display, "display", shown.append)
+    df = pd.DataFrame(
+        {"precision": [0.4123, np.nan], "support": [4029, 12268]}, index=["down", "accuracy"]
+    )
+    viz.show_table(df, "Table 2. Per-class report", {"precision": "{:.3f}", "support": "{:,}"})
+    html = shown[0].to_html()
+    assert "Table 2. Per-class report" in html
+    assert "0.412" in html and "4,029" in html and "12,268" in html
+    assert "–" in html and "nan" not in html.lower()

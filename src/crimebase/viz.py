@@ -511,3 +511,25 @@ def plot_class_metrics(table: pd.DataFrame, title: str = "Precision, recall and 
     ax.legend(ncols=3, loc="upper center", bbox_to_anchor=(0.5, -0.16))
     _head(fig, ax, title, "Held-out years; n = rows that really were in each class")
     return fig
+
+
+def show_table(df: pd.DataFrame, caption: str, formats: str | dict | None = "{:.3f}") -> None:
+    """Display a DataFrame in a notebook with a bold caption and tidy number formatting.
+
+    Missing values print as a dash instead of NaN; `formats` is one format for every numeric
+    column or a per-column dict.
+    """
+    from IPython.display import display
+
+    styler = df.style.set_caption(caption).set_table_styles(
+        [
+            {
+                "selector": "caption",
+                "props": "caption-side: top; text-align: left; font-weight: 600;"
+                " padding-bottom: 6px;",
+            }
+        ]
+    )
+    if formats:
+        styler = styler.format(formats, na_rep="–")
+    display(styler)

@@ -66,7 +66,7 @@ uv run python -m crimebase features      # panel -> data/processed/model_matrix.
 uv run python -m crimebase train         # tune + compare all models -> reports/metrics/   (~40 min, 4 CPUs)
 uv run python -m crimebase sensitivity   # effect of the minimum-count rule                 (~1 min)
 uv run python -m crimebase report        # reports/results.md, figures, models/             (~6 s)
-uv run pytest                            # 155 tests, ~45 s
+uv run pytest                            # 168 tests, ~45 s
 uv run jupyter lab                       # open notebooks/
 ```
 

@@ -19,11 +19,30 @@ Evaluation is strictly time-ordered: train on feature years up to 2016, tune on 
 
 ## Result
 
-| | Macro-F1 on the 2019+ holdout (95% CI) |
+**Test set: feature years 2019 onwards, 12,268 rows, scored once.** Precision and recall are macro averages
+over the three classes; ROC-AUC is one-vs-rest.
+
+| Model | Accuracy | Precision | Recall | F1 (macro) [95% CI] | ROC-AUC |
+|---|---|---|---|---|---|
+| Always the commonest class | 0.298 | 0.099 | 0.333 | 0.153 [0.145, 0.162] | 0.500 |
+| One-line mean-reversion rule | 0.394 | 0.412 | 0.403 | 0.387 [0.371, 0.404] | n/a |
+| **XGBoost (tuned)** | **0.417** | **0.425** | **0.418** | **0.409** [0.391, 0.427] | **0.611** |
+
+**Classification report, tuned XGBoost:**
+
+| Class | Precision | Recall | F1-score | Support |
+|---|---|---|---|---|
+| down | 0.392 | 0.593 | 0.472 | 4,029 |
+| stable | 0.446 | 0.327 | 0.377 | 3,658 |
+| up | 0.437 | 0.333 | 0.378 | 4,581 |
+| macro avg | 0.425 | 0.418 | 0.409 | 12,268 |
+
+**Overfitting check** (one model fitted on the training years): macro-F1 is 0.487 on train, 0.413 on
+validation and 0.390 on test.
+
+| Confusion matrix | ROC curves (one class against the rest) |
 |---|---|
-| Always the commonest class | 0.153 |
-| One-line mean-reversion rule | 0.387 [0.371, 0.404] |
-| **XGBoost (tuned)** | **0.409** [0.391, 0.427] |
+| ![Confusion matrix](reports/figures/y_trend_confusion.png) | ![ROC curves](reports/figures/y_trend_roc.png) |
 
 * XGBoost beats the rule by **+0.022** macro-F1 (paired 95% CI +0.003 to +0.042). A real edge, but a modest one:
   AUC is about 0.61, where 0.50 is chance.
@@ -33,7 +52,8 @@ Evaluation is strictly time-ordered: train on feature years up to 2016, tune on 
 * What the model uses is mostly *what kind of series* it is (level, crime category, state, volatility), not
   last year's growth.
 
-Everything is in [`reports/results.md`](reports/results.md), generated from the saved metrics.
+Every table and figure, numbered and captioned, is in [`reports/results.md`](reports/results.md), generated from
+the saved metrics.
 
 ## Run it
 

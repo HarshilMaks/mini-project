@@ -5,6 +5,7 @@ from crimebase.report import (
     _num,
     _signed,
     by_year_table,
+    classification_report_table,
     drivers_sentence,
     headline,
     md_table,
@@ -12,6 +13,7 @@ from crimebase.report import (
     prediction_mix_sentence,
     scores_table,
     sensitivity_sentence,
+    split_table,
     tuning_table,
 )
 from crimebase.results import SavedComparison
@@ -91,13 +93,71 @@ def test_headline_names_the_range_over_all_model_variants():
     assert "All 2 model variants land between 0.409 and 0.417" in text
 
 
-def test_scores_table_marks_rules_as_having_no_probability_metrics():
+def test_scores_table_has_the_standard_ml_columns_and_marks_rules_as_having_no_probabilities():
     table = scores_table(make_saved()).set_index("Model")
-    assert table.loc["Mean-reversion rule", "AUC [95% CI]"] == "n/a"
+    assert list(table.columns) == [
+        "Accuracy",
+        "Precision (macro)",
+        "Recall (macro)",
+        "F1 (macro) [95% CI]",
+        "ROC-AUC [95% CI]",
+        "Log loss",
+        "Trees",
+    ]
+    assert table.loc["Mean-reversion rule", "ROC-AUC [95% CI]"] == "n/a"
     assert table.loc["Mean-reversion rule", "Log loss"] == "n/a"
-    assert table.loc["XGBoost (tuned)", "AUC [95% CI]"] == "0.611 [0.589, 0.631]"
+    assert table.loc["XGBoost (tuned)", "ROC-AUC [95% CI]"] == "0.611 [0.589, 0.631]"
+    assert table.loc["XGBoost (tuned)", "Accuracy"] == "0.417"
     assert table.loc["XGBoost (tuned)", "Trees"] == "181"
     assert table.loc["Majority class", "Trees"] == ""
+    assert table.loc["XGBoost (tuned)", "Precision (macro)"] == "n/a"  # not in a saved run
+
+
+def test_scores_table_uses_recomputed_precision_and_recall_when_given():
+    saved = make_saved()
+    extra = saved.scores.assign(precision_macro=0.425, recall_macro=0.418)
+    table = scores_table(saved, extra).set_index("Model")
+    assert table.loc["XGBoost (tuned)", "Precision (macro)"] == "0.425"
+    assert table.loc["XGBoost (tuned)", "Recall (macro)"] == "0.418"
+
+
+def test_classification_report_table_reads_like_scikit_learns():
+    from crimebase.evaluate import classification_table
+
+    y = np.array([0, 0, 1, 2, 2, 2])
+    table = classification_report_table(classification_table(y, np.array([0, 1, 1, 2, 2, 0])))
+    assert list(table.columns) == ["Class", "Precision", "Recall", "F1-score", "Support"]
+    assert table["Class"].tolist() == [
+        "down",
+        "stable",
+        "up",
+        "accuracy",
+        "macro avg",
+        "weighted avg",
+    ]
+    acc = table[table["Class"] == "accuracy"].iloc[0]
+    assert acc["Precision"] == "" and acc["Recall"] == "" and acc["F1-score"] == "0.667"
+    assert table.loc[table["Class"] == "weighted avg", "Support"].iloc[0] == "6"
+
+
+def test_split_table_labels_each_split_with_its_years_and_rows():
+    perf = pd.DataFrame(
+        {
+            "years": ["2001-2016", "2017-2018", "2019-2021"],
+            "rows": [24114, 4012, 12268],
+            "accuracy": [0.49, 0.42, 0.41],
+            "precision_macro": [0.5, 0.44, 0.42],
+            "recall_macro": [0.5, 0.43, 0.41],
+            "macro_f1": [0.487, 0.413, 0.39],
+            "auc_ovr": [0.685, 0.628, 0.604],
+            "log_loss": [1.008, 1.054, 1.074],
+        },
+        index=["Train", "Validation", "Test"],
+    )
+    table = split_table(perf)
+    assert table["Split"].tolist() == ["Train", "Validation", "Test"]
+    assert table["Rows"].tolist() == ["24,114", "4,012", "12,268"]
+    assert table.loc[0, "F1 (macro)"] == "0.487" and table.loc[2, "ROC-AUC"] == "0.604"
 
 
 def test_paired_table_says_whether_zero_is_excluded():
@@ -162,3 +222,12 @@ def test_markdown_tables_never_contain_a_stray_pipe_in_a_header():
 
     table = md_table(pd.DataFrame({"Feature": ["lv"], "Mean abs. SHAP": ["0.088"]}))
     assert all(line.count("|") == 3 for line in table.splitlines())
+
+
+def test_overfit_sentence_states_the_train_to_test_gap():
+    from crimebase.report import overfit_sentence
+
+    perf = pd.DataFrame({"macro_f1": [0.487, 0.413, 0.390]}, index=["Train", "Validation", "Test"])
+    text = overfit_sentence(perf)
+    assert "0.487 on the training years, 0.413 on validation and 0.390 on test" in text
+    assert "gap of 0.097" in text

@@ -13,18 +13,26 @@ import numpy as np
 import pandas as pd
 
 from crimebase.config import Config
-from crimebase.experiment import final_fit, holdout_of
+from crimebase.evaluate import classification_table
+from crimebase.experiment import final_fit, holdout_of, split_performance
 from crimebase.explain import contributions, importance
 from crimebase.features import FEATURES
 from crimebase.pipeline import load_matrix
-from crimebase.results import SavedComparison, load_comparison, scores_by_year
+from crimebase.results import (
+    SavedComparison,
+    load_comparison,
+    recompute_scores,
+    scores_by_year,
+)
 from crimebase.splits import holdout_mask
 from crimebase.viz import (
     BASELINES,
     label,
     plot_by_year,
+    plot_class_metrics,
     plot_confusion,
     plot_importance,
+    plot_roc,
     plot_scores,
     plot_sensitivity,
     plot_tuning,
@@ -55,22 +63,67 @@ def _ci(value: float, lo: float, hi: float) -> str:
     return f"{_num(value)} [{_num(lo)}, {_num(hi)}]"
 
 
-def scores_table(saved: SavedComparison) -> pd.DataFrame:
+def _f(v: float) -> str:
+    return "n/a" if pd.isna(v) else f"{v:.3f}"
+
+
+def scores_table(saved: SavedComparison, extra: pd.DataFrame | None = None) -> pd.DataFrame:
+    """The standard test-set table: accuracy, precision, recall, F1, ROC-AUC and log loss.
+
+    Precision and recall are macro averages over the three classes. `extra` (from
+    `recompute_scores`) supplies the columns the saved run does not hold; without it they read n/a.
+    """
     s = saved.scores
     rows = []
     for entry, r in s.iterrows():
+        e = extra.loc[entry] if extra is not None else r
         has_auc = pd.notna(r["auc_ovr"])
         rows.append(
             {
                 "Model": label(entry),
-                "Macro-F1 [95% CI]": _ci(r["macro_f1"], r["f1_lo"], r["f1_hi"]),
-                "Balanced acc.": f"{r['balanced_acc']:.3f}",
-                "AUC [95% CI]": _ci(r["auc_ovr"], r["auc_lo"], r["auc_hi"]) if has_auc else "n/a",
-                "Log loss": f"{r['log_loss']:.3f}" if pd.notna(r["log_loss"]) else "n/a",
+                "Accuracy": _f(e["accuracy"]),
+                "Precision (macro)": _f(e.get("precision_macro", np.nan)),
+                "Recall (macro)": _f(e.get("recall_macro", r["balanced_acc"])),
+                "F1 (macro) [95% CI]": _ci(r["macro_f1"], r["f1_lo"], r["f1_hi"]),
+                "ROC-AUC [95% CI]": _ci(r["auc_ovr"], r["auc_lo"], r["auc_hi"])
+                if has_auc
+                else "n/a",
+                "Log loss": _f(r["log_loss"]),
                 "Trees": f"{int(r['trees'])}" if pd.notna(r["trees"]) else "",
             }
         )
     return pd.DataFrame(rows)
+
+
+def classification_report_table(table: pd.DataFrame) -> pd.DataFrame:
+    """`classification_table` as strings, laid out like scikit-learn's printed report."""
+    out = pd.DataFrame(
+        {
+            "Class": table.index,
+            "Precision": [_f(v) for v in table["precision"]],
+            "Recall": [_f(v) for v in table["recall"]],
+            "F1-score": [_f(v) for v in table["f1-score"]],
+            "Support": [f"{int(v):,}" for v in table["support"]],
+        }
+    )
+    return out.replace("n/a", "")
+
+
+def split_table(perf: pd.DataFrame) -> pd.DataFrame:
+    """Train / validation / test rows of `split_performance` as a labelled table."""
+    return pd.DataFrame(
+        {
+            "Split": perf.index,
+            "Years (feature year)": perf["years"].to_numpy(),
+            "Rows": [f"{int(v):,}" for v in perf["rows"]],
+            "Accuracy": [_f(v) for v in perf["accuracy"]],
+            "Precision (macro)": [_f(v) for v in perf["precision_macro"]],
+            "Recall (macro)": [_f(v) for v in perf["recall_macro"]],
+            "F1 (macro)": [_f(v) for v in perf["macro_f1"]],
+            "ROC-AUC": [_f(v) for v in perf["auc_ovr"]],
+            "Log loss": [_f(v) for v in perf["log_loss"]],
+        }
+    )
 
 
 def paired_table(saved: SavedComparison) -> pd.DataFrame:
@@ -190,6 +243,16 @@ def prediction_mix_sentence(y_true, proba) -> str:
     return f"Actual mix of the held-out rows: {a}. Mix the model predicted: {g}."
 
 
+def overfit_sentence(perf: pd.DataFrame) -> str:
+    """The train-to-test gap of one model, in macro-F1."""
+    tr, va, te = (perf.loc[k, "macro_f1"] for k in ("Train", "Validation", "Test"))
+    return (
+        f"Macro-F1 is {tr:.3f} on the training years, {va:.3f} on validation and {te:.3f} on test: "
+        f"a train-to-test gap of {tr - te:.3f}. The model fits the rows it was trained on better "
+        "than unseen years, so the held-out numbers, not the training ones, are the result."
+    )
+
+
 def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
     """Write figures, SHAP table, the tuned model file and reports/results.md. Returns paths."""
     saved = load_comparison(cfg, target)
@@ -202,6 +265,7 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
     def fig_path(name: str):
         return fig_dir / f"{target}_{name}.png"
 
+    extra = recompute_scores(saved, m, cfg)
     save_figure(plot_scores(saved.scores), fig_path("scores"))
     year_entries = [
         e for e in ("mean_reversion", "xgboost_tuned", "ensemble") if e in saved.scores.index
@@ -210,16 +274,24 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
     save_figure(plot_by_year(by_year), fig_path("by_year"))
 
     h = holdout_of(m, cfg, target)
-    save_figure(plot_confusion(h.y, saved.proba("xgboost_tuned").to_numpy()), fig_path("confusion"))
-    if "xgboost" in saved.tuning:
-        t = saved.tuning["xgboost"]
-        trials = pd.read_csv(cfg.paths.metrics / f"{target}_trials_xgboost.csv")
-        save_figure(
-            plot_tuning(trials, t["default_cv_log_loss"], "XGBoost tuning"),
-            fig_path("tuning_xgboost"),
-        )
+    final_proba = saved.proba("xgboost_tuned").to_numpy()
+    final_pred = final_proba.argmax(axis=1)
+    cls_report = classification_table(h.y, final_pred)
+    cls_report.to_csv(cfg.paths.metrics / f"{target}_classification_report.csv")
+    save_figure(plot_confusion(h.y, final_proba), fig_path("confusion"))
+    save_figure(plot_roc(h.y, final_proba), fig_path("roc"))
+    save_figure(plot_class_metrics(cls_report), fig_path("class_metrics"))
 
-    final, _ = final_fit("xgboost", m, cfg, target, saved.tuning["xgboost"]["best_params"])
+    t = saved.tuning["xgboost"]
+    best = t["best_params"]
+    perf = split_performance(m, cfg, target, "xgboost", best)
+    perf.to_csv(cfg.paths.metrics / f"{target}_split_performance.csv")
+    trials = pd.read_csv(cfg.paths.metrics / f"{target}_trials_xgboost.csv")
+    save_figure(
+        plot_tuning(trials, t["default_cv_log_loss"], "XGBoost tuning"), fig_path("tuning_xgboost")
+    )
+
+    final, _ = final_fit("xgboost", m, cfg, target, best)
     cfg.paths.models.mkdir(parents=True, exist_ok=True)
     model_file = cfg.paths.models / f"{target}_xgboost.json"
     final.model.save_model(model_file)
@@ -242,56 +314,108 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
         "",
         "Generated by `python -m crimebase report` from `reports/metrics/`. Do not edit by hand.",
         "",
-        "## Headline",
+        "## 1. Summary",
         "",
         headline(saved),
         "",
-        "## Setup",
+        "## 2. Problem and data",
         "",
-        f"- Task: for a state/UT and crime head in year *t*, predict whether `cases_registered` in "
-        f"*t+1* goes **down**, stays **stable** or goes **up**, with a band of "
-        f"±{meta['trend_band']:.0%}.",
-        f"- Rows: a series-year needs at least {meta['min_cases']} registered cases, a next year, "
-        "no state boundary change, no source switch and no 10x jump.",
-        f"- Time split: train on feature years up to {meta['train_to']}, validate on "
-        f"{meta['val_years'][0]}-{meta['val_years'][-1]}, test once on {meta['test_from']} onwards "
-        f"(**{meta['holdout_rows']:,} rows** in {meta['holdout_clusters']} state-year groups).",
-        f"- Tuning: {meta['n_trials']} Optuna trials per model over expanding time folds; "
-        f"intervals are {meta['n_boot']}-resample bootstraps of whole state-year groups.",
+        "- **Task:** multi-class classification. For a state/UT and crime head in year *t*, "
+        "predict whether `cases_registered` in *t+1* goes **down**, stays **stable** or goes "
+        "**up**, with "
+        f"a band of ±{meta['trend_band']:.0%}.",
+        f"- **Rows:** a series-year needs at least {meta['min_cases']} registered cases, a next "
+        "year, no state boundary change, no source switch and no 10x jump.",
+        f"- **Split (by time, never random):** train on feature years up to {meta['train_to']}, "
+        f"validate on {meta['val_years'][0]}-{meta['val_years'][-1]}, test once on "
+        f"{meta['test_from']} onwards (**{meta['holdout_rows']:,} test rows** in "
+        f"{meta['holdout_clusters']} state-year groups).",
+        "- **Classes:** `down`, `stable`, `up`; chance accuracy is about one in three.",
+        f"- **Tuning:** {meta['n_trials']} Optuna trials per model over expanding time folds; "
+        f"confidence intervals are {meta['n_boot']}-resample bootstraps of whole state-year "
+        "groups.",
         "",
-        "## All models on the held-out years",
+        "## 3. Test-set performance of every model",
         "",
-        md_table(scores_table(saved)),
+        "**Table 1.** Metrics on the held-out years. Precision and recall are macro averages over "
+        "the three classes; ROC-AUC is one-vs-rest. Lower log loss is better.",
         "",
-        f"![Models against baselines]({FIG}/{target}_scores.png)",
+        md_table(scores_table(saved, extra)),
         "",
-        "## Is a model really better? Paired comparisons",
+        f"![Figure 1: macro-F1 of every model with 95% intervals]({FIG}/{target}_scores.png)",
         "",
-        "Both sides are scored on the same bootstrap resamples, so shared noise cancels.",
+        "**Figure 1.** Macro-F1 of every model with 95% intervals; baselines are grey.",
+        "",
+        "## 4. The final model: tuned XGBoost",
+        "",
+        "### 4.1 Classification report",
+        "",
+        "**Table 2.** Per-class precision, recall and F1 on the held-out years.",
+        "",
+        md_table(classification_report_table(cls_report)),
+        "",
+        f"![Figure 2: precision, recall and F1 by class]({FIG}/{target}_class_metrics.png)",
+        "",
+        "**Figure 2.** Precision, recall and F1 by class.",
+        "",
+        "### 4.2 Confusion matrix",
+        "",
+        f"![Figure 3: confusion matrix]({FIG}/{target}_confusion.png)",
+        "",
+        "**Figure 3.** Row-normalised confusion matrix: the share of each actual class, with the "
+        "count underneath.",
+        "",
+        prediction_mix_sentence(h.y, final_proba),
+        "",
+        "### 4.3 ROC curves",
+        "",
+        f"![Figure 4: one-vs-rest ROC curves]({FIG}/{target}_roc.png)",
+        "",
+        "**Figure 4.** One-vs-rest ROC curve per class; the dashed line is chance.",
+        "",
+        "### 4.4 Train, validation and test",
+        "",
+        "**Table 3.** One XGBoost model fitted on the training years and early-stopped on the "
+        "validation years, scored on all three splits. The headline test numbers above refit on "
+        "train + validation first, so they differ from this table's test row.",
+        "",
+        md_table(split_table(perf)),
+        "",
+        overfit_sentence(perf),
+        "",
+        "## 5. Is one model really better? Paired tests",
+        "",
+        "**Table 4.** Difference between two models on the same bootstrap resamples, so shared "
+        "noise cancels. `Excludes 0` says whether the 95% interval stays on one side of zero.",
         "",
         md_table(paired_table(saved)),
         "",
-        "## Tuning",
+        "## 6. Hyperparameter tuning",
+        "",
+        "**Table 5.** Mean cross-validated log loss over the time folds (lower is better).",
         "",
         md_table(tuning_table(saved)),
         "",
-        f"![XGBoost tuning history]({FIG}/{target}_tuning_xgboost.png)",
+        f"![Figure 5: XGBoost tuning history]({FIG}/{target}_tuning_xgboost.png)",
         "",
-        "## By held-out year",
+        "**Figure 5.** Each completed trial and the best so far.",
+        "",
+        "## 7. Performance by held-out year",
+        "",
+        "**Table 6.** Macro-F1 for each feature year in the test period.",
         "",
         md_table(by_year_table(by_year)),
         "",
-        f"![Macro-F1 by year]({FIG}/{target}_by_year.png)",
+        f"![Figure 6: macro-F1 by held-out year]({FIG}/{target}_by_year.png)",
         "",
-        "## Where the tuned XGBoost is right and wrong",
+        "**Figure 6.** Macro-F1 by held-out year.",
         "",
-        f"![Confusion matrix]({FIG}/{target}_confusion.png)",
-        "",
-        prediction_mix_sentence(h.y, saved.proba("xgboost_tuned").to_numpy()),
-        "",
-        "## What drives it (TreeSHAP)",
+        "## 8. What drives the model (TreeSHAP)",
         "",
         drivers_sentence(imp),
+        "",
+        "**Table 7.** The ten features with the largest mean absolute SHAP value over the test "
+        "rows.",
         "",
         md_table(top_table),
         "",
@@ -299,14 +423,19 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
         "last four years of log counts, `g1` last year's log growth and `g1_rel` that growth "
         "relative to other states for the same head.",
         "",
-        f"![Feature importance]({FIG}/{target}_importance.png)",
+        f"![Figure 7: feature importance]({FIG}/{target}_importance.png)",
+        "",
+        "**Figure 7.** Mean absolute SHAP value of the top features.",
         "",
     ]
     if sens is not None:
         text += [
-            "## Sensitivity to the minimum-count rule",
+            "## 9. Sensitivity to the minimum-count rule",
             "",
             sensitivity_sentence(sens),
+            "",
+            "**Table 8.** Default XGBoost and the mean-reversion rule scored on the same rows at "
+            "each minimum count.",
             "",
             md_table(
                 pd.DataFrame(
@@ -322,11 +451,13 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
                 )
             ),
             "",
-            f"![Sensitivity]({FIG}/{target}_sensitivity.png)",
+            f"![Figure 8: sensitivity to min_cases]({FIG}/{target}_sensitivity.png)",
+            "",
+            "**Figure 8.** Macro-F1 of the model and of the rule as the minimum count rises.",
             "",
         ]
     text += [
-        "## Limits",
+        "## 10. Limitations",
         "",
         "- Reported crime reflects registration practice, not crime itself; definitions change "
         "between NCRB editions and a row that jumps 10x is treated as a definition break.",
@@ -334,6 +465,15 @@ def build_report(cfg: Config, target: str = "y_trend") -> dict[str, Path]:
         "- Three held-out years (one of them 2020) is a small number of independent periods, which "
         "is why the intervals resample whole state-year groups.",
         "- The signal is modest. Compare every model with the mean-reversion rule, not chance.",
+        "",
+        "## Reproduce",
+        "",
+        "```bash",
+        "uv sync",
+        "uv run python -m crimebase clean && uv run python -m crimebase features",
+        "uv run python -m crimebase train          # about 40 minutes on 4 CPUs",
+        "uv run python -m crimebase sensitivity && uv run python -m crimebase report",
+        "```",
         "",
     ]
     cfg.paths.report.parent.mkdir(parents=True, exist_ok=True)

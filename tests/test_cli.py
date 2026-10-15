@@ -68,7 +68,24 @@ def test_cli_sensitivity_then_report_write_the_deliverables(config_file, cfg, ca
     assert text.startswith("# Results") and "Sensitivity to the minimum-count rule" in text
     assert (cfg.paths.models / "y_trend_xgboost.json").exists()
     figures = {p.name for p in cfg.paths.figures.iterdir()}
-    assert {"y_trend_scores.png", "y_trend_by_year.png", "y_trend_importance.png"} <= figures
+    assert {
+        "y_trend_scores.png",
+        "y_trend_by_year.png",
+        "y_trend_importance.png",
+        "y_trend_roc.png",
+        "y_trend_class_metrics.png",
+    } <= figures
+    for heading in (
+        "## 1. Summary",
+        "**Table 1.**",
+        "### 4.1 Classification report",
+        "### 4.4 Train, validation and test",
+        "**Figure 4.**",
+    ):
+        assert heading in text, heading
+    assert {"y_trend_classification_report.csv", "y_trend_split_performance.csv"} <= {
+        p.name for p in cfg.paths.metrics.iterdir()
+    }
     assert (cfg.paths.metrics / "y_trend_sensitivity.csv").exists()
 
 

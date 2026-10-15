@@ -109,3 +109,23 @@ def test_scores_by_year_covers_models_and_rules_and_matches_the_overall_score(sa
         average="macro",
     )
     assert table.loc[table.index[0], "xgboost_tuned"] == pytest.approx(expected)
+
+
+def test_recompute_scores_reproduces_the_saved_scores_and_adds_precision_and_recall(saved):
+    from crimebase.results import recompute_scores
+
+    cfg, m, cmp, back = saved
+    table = recompute_scores(back, m, cfg)
+    assert list(table.index) == list(back.scores.index)
+    assert {"accuracy", "precision_macro", "recall_macro"} <= set(table.columns)
+    shared = ["macro_f1", "accuracy", "balanced_acc"]
+    pd.testing.assert_frame_equal(
+        table[shared].astype(float), back.scores[shared].astype(float), check_exact=False, rtol=1e-9
+    )
+    models = [e for e in table.index if e not in ("persistence", "mean_reversion")]
+    pd.testing.assert_series_equal(
+        table.loc[models, "log_loss"].astype(float),
+        back.scores.loc[models, "log_loss"].astype(float),
+        check_exact=False,
+        rtol=1e-6,
+    )

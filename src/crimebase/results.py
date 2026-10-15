@@ -11,7 +11,7 @@ import pandas as pd
 from sklearn.metrics import f1_score
 
 from crimebase.config import Config
-from crimebase.evaluate import CLASS_NAMES, LABELS
+from crimebase.evaluate import CLASS_NAMES, LABELS, multiclass_scores
 from crimebase.experiment import Comparison, rule_predictions
 
 ID_COLUMNS = ["state_code", "scope", "head_key", "year"]
@@ -118,3 +118,26 @@ def scores_by_year(saved: SavedComparison, m: pd.DataFrame, cfg: Config, entries
             for year, g in preds.groupby("year")
         }
     return pd.DataFrame(out).sort_index()
+
+
+def recompute_scores(
+    saved: SavedComparison, m: pd.DataFrame, cfg: Config, entries: list[str] | None = None
+) -> pd.DataFrame:
+    """The full metric set (accuracy, precision, recall, F1, AUC, log loss) for each entry.
+
+    Recomputed from the saved holdout predictions, so metrics added after a training run (macro
+    precision and recall) are available without retraining. Everything that has probabilities
+    uses them; the two rule baselines use hard predictions rebuilt from the matrix.
+    """
+    entries = list(saved.scores.index) if entries is None else entries
+    y = saved.predictions["y_true"].to_numpy()
+    rules = rule_predictions(m, cfg, saved.meta["target"])
+    out = {}
+    for entry in entries:
+        if entry in rules:
+            out[entry] = multiclass_scores(y, pred=rules[entry])
+        else:
+            out[entry] = multiclass_scores(y, proba=saved.proba(entry).to_numpy())
+    table = pd.DataFrame(out).T
+    table.index.name = "entry"
+    return table

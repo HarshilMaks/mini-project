@@ -459,3 +459,55 @@ def show(fig, dpi: int = 130) -> None:
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     display(Image(buf.getvalue()))
+
+
+def plot_roc(
+    y_true,
+    proba,
+    title: str = "ROC curves, one class against the rest",
+    subtitle: str | None = "Dashed diagonal = chance (AUC 0.50)",
+):
+    """One-vs-rest ROC curve per class. Three series use the first three palette slots."""
+    from crimebase.evaluate import roc_points
+
+    apply_style()
+    fig, ax = plt.subplots(figsize=(5.6, 5.2), layout="constrained")
+    ax.plot([0, 1], [0, 1], color=INK2, lw=1, ls=(0, (4, 3)))
+    handles = []
+    for color, (name, (fpr, tpr, auc)) in zip(
+        SERIES, roc_points(y_true, proba).items(), strict=False
+    ):
+        ax.plot(fpr, tpr, color=color, lw=2)
+        handles.append(Line2D([], [], color=color, lw=2, label=f"{name}  (AUC {auc:.3f})"))
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1.01)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("False positive rate")
+    ax.set_ylabel("True positive rate")
+    ax.legend(handles=handles, loc="lower right", title="Class (one vs rest)")
+    _head(fig, ax, title, subtitle)
+    return fig
+
+
+def plot_class_metrics(table: pd.DataFrame, title: str = "Precision, recall and F1 by class"):
+    """Grouped bars for down / stable / up from `classification_table`, with values printed."""
+    apply_style()
+    classes = ["down", "stable", "up"]
+    metrics = ["precision", "recall", "f1-score"]
+    width = 0.26
+    fig, ax = plt.subplots(figsize=(7.2, 4.2), layout="constrained")
+    x = np.arange(len(classes))
+    for i, (color, metric) in enumerate(zip(SERIES[:3], metrics, strict=True)):
+        values = table.loc[classes, metric].to_numpy(dtype=float)
+        bars = ax.bar(x + (i - 1) * width, values, width=width * 0.92, color=color, label=metric)
+        for rect, v in zip(bars, values, strict=True):
+            ax.text(rect.get_x() + rect.get_width() / 2, v + 0.008, f"{v:.2f}", ha="center",
+                    va="bottom", color=INK2, fontsize=8)  # fmt: skip
+    support = table.loc[classes, "support"].to_numpy()
+    ax.set_xticks(x, [f"{c}\n(n = {n:,})" for c, n in zip(classes, support, strict=True)])
+    ax.set_ylim(0, max(0.7, float(table.loc[classes, metrics].to_numpy(dtype=float).max()) + 0.08))
+    ax.set_ylabel("Score")
+    ax.grid(axis="x", visible=False)
+    ax.legend(ncols=3, loc="upper center", bbox_to_anchor=(0.5, -0.16))
+    _head(fig, ax, title, "Held-out years; n = rows that really were in each class")
+    return fig

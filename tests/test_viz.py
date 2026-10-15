@@ -178,3 +178,42 @@ def test_by_year_end_labels_do_not_overprint_when_lines_end_together():
     labels = [t for t in fig.axes[0].texts if t.get_text().replace(".", "").isdigit()]
     ys = sorted(t.get_position()[1] for t in labels)
     assert len(ys) == 3 and min(b - a for a, b in zip(ys, ys[1:], strict=False)) > 0
+
+
+def class_inputs():
+    rng = np.random.default_rng(0)
+    y = rng.integers(0, 3, 600)
+    proba = np.eye(3)[np.where(rng.random(600) < 0.5, y, rng.integers(0, 3, 600))] * 0.6 + 0.133
+    return y, proba
+
+
+def test_roc_chart_has_three_class_curves_a_chance_line_and_auc_in_the_legend():
+    y, proba = class_inputs()
+    fig = viz.plot_roc(y, proba)
+    ax = fig.axes[0]
+    colors = [ln.get_color() for ln in ax.lines]
+    assert colors[0] == viz.INK2 and colors[1:] == viz.SERIES[:3]  # chance first, then slots 1-3
+    texts = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert [t.split()[0] for t in texts] == ["down", "stable", "up"]
+    assert all("AUC 0." in t for t in texts)
+    assert ax.get_xlabel() == "False positive rate" and ax.get_ylabel() == "True positive rate"
+
+
+def test_class_metrics_chart_prints_every_value_and_the_class_support():
+    from crimebase.evaluate import classification_table
+
+    y, proba = class_inputs()
+    table = classification_table(y, proba.argmax(axis=1))
+    fig = viz.plot_class_metrics(table)
+    ax = fig.axes[0]
+    printed = [t.get_text() for t in ax.texts if "." in t.get_text() and "(" not in t.get_text()]
+    assert len(printed) == 9  # 3 classes x precision, recall, F1
+    labels = [t.get_text() for t in ax.get_xticklabels()]
+    assert (
+        labels[0].startswith("down") and f"n = {int(table.loc['down', 'support']):,}" in labels[0]
+    )
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == [
+        "precision",
+        "recall",
+        "f1-score",
+    ]

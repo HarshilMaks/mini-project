@@ -1,0 +1,16 @@
+{
+  "target": "y_trend",
+  "n_trials": 40,
+  "n_boot": 500,
+  "seed": 42,
+  "min_cases": 50,
+  "trend_band": 0.1,
+  "train_to": 2016,
+  "val_years": [
+    2017,
+    2018
+  ],
+  "test_from": 2019,
+  "holdout_rows": 12268,
+  "holdout_clusters": 107
+}

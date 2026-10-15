@@ -167,16 +167,28 @@ def plot_confusion(y_true, proba, title: str = "Where the model is right and wro
     return fig
 
 
+def _spread(values: list[float], min_gap: float) -> list[float]:
+    """Nudge label positions apart, keeping their order, so none overprint."""
+    out = np.array(values, dtype=float)
+    order = np.argsort(out, kind="stable")
+    for prev, cur in zip(order[:-1], order[1:], strict=True):
+        if out[cur] - out[prev] < min_gap:
+            out[cur] = out[prev] + min_gap
+    return out.tolist()
+
+
 def plot_by_year(table: pd.DataFrame, title: str = "Macro-F1 by holdout year"):
     """table: rows = feature year, columns = entry names. One line per entry (max 4)."""
     apply_style()
     if table.shape[1] > len(SERIES):
         raise ValueError(f"at most {len(SERIES)} series; fold the rest or use small multiples")
     fig, ax = plt.subplots(figsize=(7.2, 4.2), layout="constrained")
-    for color, col in zip(SERIES, table.columns, strict=False):
+    ends = [table[col].iloc[-1] for col in table.columns]
+    span = float(np.nanmax(table.to_numpy()) - np.nanmin(table.to_numpy())) or 1.0
+    for color, col, y_text in zip(SERIES, table.columns, _spread(ends, 0.06 * span), strict=False):
         ax.plot(table.index, table[col], color=color, lw=2, marker="o", ms=8, mec=SURFACE, mew=2)
         ax.text(
-            table.index[-1] + 0.06, table[col].iloc[-1], f"{table[col].iloc[-1]:.3f}",
+            table.index[-1] + 0.06, y_text, f"{table[col].iloc[-1]:.3f}",
             va="center", color=INK2, fontsize=9,
         )  # fmt: skip
     ax.set_xticks(list(table.index), [f"{y} → {y + 1}" for y in table.index])
@@ -197,9 +209,15 @@ def plot_by_year(table: pd.DataFrame, title: str = "Macro-F1 by holdout year"):
 
 
 def plot_tuning(trials: pd.DataFrame, default_value: float, title: str = "Tuning history"):
-    """Each trial's CV log loss, the best so far, and the default parameters as a reference."""
+    """Each completed trial's CV log loss, the best so far, and the default parameters.
+
+    Pruned trials are left out: Optuna records their last partial value (a mean over the first
+    easy folds only), which is not comparable with a full cross-validation score.
+    """
     apply_style()
-    done = trials.dropna(subset=["value"]).sort_values("number")
+    pruned = int((trials["state"] != "COMPLETE").sum()) if "state" in trials else 0
+    done = trials[trials["state"] == "COMPLETE"] if "state" in trials else trials
+    done = done.dropna(subset=["value"]).sort_values("number")
     fig, ax = plt.subplots(figsize=(7.2, 4.0), layout="constrained")
     ax.plot(done["number"], done["value"], "o", color=MUTED, ms=6, mec=SURFACE, mew=1.5)
     ax.step(done["number"], done["value"].cummin(), where="post", color=SERIES[0], lw=2)
@@ -217,7 +235,8 @@ def plot_tuning(trials: pd.DataFrame, default_value: float, title: str = "Tuning
         ],
         loc="lower left",
     )
-    _head(fig, ax, title, "Time-ordered folds; the 2019+ test years take no part")
+    note = f"; {pruned} weak trial(s) stopped early and not shown" if pruned else ""
+    _head(fig, ax, title, "Time-ordered folds; the 2019+ test years take no part" + note)
     return fig
 
 

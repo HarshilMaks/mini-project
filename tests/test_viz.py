@@ -139,3 +139,42 @@ def test_line_chart_uses_thousands_separators_for_large_values():
     fig.canvas.draw()
     ticks = [t.get_text() for t in fig.axes[0].get_yticklabels() if t.get_text()]
     assert any("," in t for t in ticks)
+
+
+def test_tuning_chart_ignores_pruned_trials():
+    trials = pd.DataFrame(
+        {
+            "number": range(5),
+            "value": [
+                1.04,
+                1.03,
+                1.02,
+                0.90,
+                1.035,
+            ],  # trial 3 is pruned: a partial, too-good value
+            "state": ["COMPLETE", "COMPLETE", "COMPLETE", "PRUNED", "COMPLETE"],
+        }
+    )
+    fig = viz.plot_tuning(trials, default_value=1.04)
+    ax = fig.axes[0]
+    best = [ln for ln in ax.lines if ln.get_color() == viz.SERIES[0]][0]
+    assert min(best.get_ydata()) == 1.02  # not the pruned 0.90
+    dots = [ln for ln in ax.lines if ln.get_marker() == "o"][0]
+    assert len(dots.get_xdata()) == 4
+    assert any("1 weak trial(s) stopped early" in t.get_text() for t in ax.texts)
+
+
+def test_spread_separates_equal_values_and_keeps_order():
+    out = viz._spread([0.406, 0.406, 0.359], min_gap=0.01)
+    assert out[2] == 0.359 and out[0] == 0.406 and out[1] >= 0.416 - 1e-12
+    assert viz._spread([0.1, 0.5], min_gap=0.01) == [0.1, 0.5]  # well apart, untouched
+
+
+def test_by_year_end_labels_do_not_overprint_when_lines_end_together():
+    table = pd.DataFrame(
+        {"a": [0.38, 0.406], "b": [0.381, 0.406], "c": [0.34, 0.359]}, index=[2019, 2020]
+    )
+    fig = viz.plot_by_year(table)
+    labels = [t for t in fig.axes[0].texts if t.get_text().replace(".", "").isdigit()]
+    ys = sorted(t.get_position()[1] for t in labels)
+    assert len(ys) == 3 and min(b - a for a, b in zip(ys, ys[1:], strict=False)) > 0
